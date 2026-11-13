@@ -1,0 +1,271 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Helpers ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Strict single-owner authority: only the repository owner can upload/manage programs & versions
+    function isAdmin() {
+      return isVerified() && request.auth.token.email == 'm4rl0nh3rn4nd3z@gmail.com';
+    }
+
+    // --- Entity Validation Helpers ---
+    function isValidProgram(data) {
+      return data.keys().hasAll([
+          'id', 'slug', 'name', 'summary', 'description', 'category', 'platform',
+          'iconUrl', 'imageUrl',
+          'latestVersion', 'latestChannel', 'downloadCount', 'commentCount',
+          'autoUpdateEnabled', 'status', 'ownerId', 'ownerName', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'slug', 'name', 'summary', 'description', 'category', 'platform',
+          'iconUrl', 'imageUrl',
+          'latestVersion', 'latestChannel', 'downloadCount', 'commentCount',
+          'autoUpdateEnabled', 'status', 'ownerId', 'ownerName', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 80 && data.slug.matches('^[a-z0-9\\-]+$') &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+        data.summary is string && data.summary.size() >= 5 && data.summary.size() <= 240 &&
+        data.description is string && data.description.size() >= 10 && data.description.size() <= 4000 &&
+        data.category in ['Programas de Venta', 'Punto de Venta', 'Impresión Térmica', 'Utilidades y Drivers'] &&
+        data.platform in ['Windows', 'Android'] &&
+        data.iconUrl is string && data.iconUrl.size() <= 500 &&
+        data.imageUrl is string && data.imageUrl.size() <= 500 &&
+        data.latestVersion is string && data.latestVersion.size() >= 1 && data.latestVersion.size() <= 32 &&
+        data.latestVersion.matches('^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.]+)?$') &&
+        data.latestChannel in ['Estable', 'Beta', 'Parche Crítico'] &&
+        data.downloadCount is int && data.downloadCount >= 0 &&
+        data.commentCount is int && data.commentCount >= 0 &&
+        data.autoUpdateEnabled is bool &&
+        data.status in ['Activo', 'Archivado'] &&
+        isValidId(data.ownerId) &&
+        data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 80 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVersion(data, programId) {
+      return data.keys().hasAll([
+          'id', 'programId', 'version', 'channel', 'fileName', 'fileSizeBytes',
+          'downloadUrl', 'sha256', 'signature', 'changelog', 'minOs',
+          'mandatory', 'isLatest', 'revoked', 'downloads', 'authorId', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'programId', 'version', 'channel', 'fileName', 'fileSizeBytes',
+          'downloadUrl', 'sha256', 'signature', 'changelog', 'minOs',
+          'mandatory', 'isLatest', 'revoked', 'downloads', 'authorId', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.programId) &&
+        data.programId == programId &&
+        data.version is string && data.version.size() >= 1 && data.version.size() <= 32 &&
+        data.version.matches('^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.]+)?$') &&
+        data.channel in ['Estable', 'Beta', 'Parche Crítico'] &&
+        data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 180 &&
+        data.fileSizeBytes is int && data.fileSizeBytes >= 0 &&
+        data.downloadUrl is string && data.downloadUrl.size() >= 1 && data.downloadUrl.size() <= 500 &&
+        data.sha256 is string && data.sha256.size() == 64 && data.sha256.matches('^[a-fA-F0-9]{64}$') &&
+        data.signature is string && data.signature.size() >= 64 && data.signature.size() <= 128 && data.signature.matches('^[a-fA-F0-9]{64,128}$') &&
+        data.changelog is string && data.changelog.size() >= 3 && data.changelog.size() <= 3000 &&
+        data.minOs is string && data.minOs.size() >= 2 && data.minOs.size() <= 80 &&
+        data.mandatory is bool &&
+        data.isLatest is bool &&
+        data.revoked is bool &&
+        data.downloads is int && data.downloads >= 0 &&
+        isValidId(data.authorId) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidComment(data, programId) {
+      return data.keys().hasAll([
+          'id', 'programId', 'authorId', 'authorName', 'versionTag',
+          'category', 'rating', 'body', 'pinned', 'adminReply', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'programId', 'authorId', 'authorName', 'versionTag',
+          'category', 'rating', 'body', 'pinned', 'adminReply', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.programId) &&
+        data.programId == programId &&
+        isValidId(data.authorId) &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+        data.versionTag is string && data.versionTag.size() >= 1 && data.versionTag.size() <= 32 &&
+        data.category in ['Opinión', 'Soporte', 'Reporte de Error', 'Sugerencia'] &&
+        data.rating is int && data.rating >= 1 && data.rating <= 5 &&
+        data.body is string && data.body.size() >= 3 && data.body.size() <= 1200 &&
+        data.pinned is bool &&
+        data.adminReply is string && data.adminReply.size() <= 1000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // Administrators Registry (Locked down: single owner enforced directly)
+    match /admins/{userId} {
+      allow read, write: if false;
+    }
+
+    // Programs Catalog
+    match /programs/{programId} {
+      allow get: if isValidId(programId);
+      allow list: if resource.data.status in ['Activo', 'Archivado'];
+
+      allow create: if isAdmin() &&
+        isValidId(programId) &&
+        isValidProgram(incoming()) &&
+        incoming().id == programId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().downloadCount == 0 &&
+        incoming().commentCount == 0 &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(programId) &&
+        isValidProgram(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'slug', 'name', 'summary', 'description', 'category', 'platform',
+              'iconUrl', 'imageUrl',
+              'latestVersion', 'latestChannel', 'downloadCount', 'commentCount',
+              'autoUpdateEnabled', 'status', 'ownerName', 'updatedAt'
+            ])
+          ) ||
+          (
+            isVerified() &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['downloadCount', 'updatedAt']) &&
+            incoming().downloadCount == existing().downloadCount + 1
+          ) ||
+          (
+            isVerified() &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['commentCount', 'updatedAt']) &&
+            incoming().commentCount == existing().commentCount + 1
+          )
+        );
+
+      allow delete: if isAdmin() && isValidId(programId);
+
+      // Program Versions Subcollection
+      match /versions/{versionId} {
+        allow get: if isValidId(programId) && isValidId(versionId);
+        allow list: if resource.data.programId == programId;
+
+        allow create: if isAdmin() &&
+          isValidId(programId) &&
+          isValidId(versionId) &&
+          isValidVersion(incoming(), programId) &&
+          incoming().id == versionId &&
+          incoming().authorId == request.auth.uid &&
+          incoming().downloads == 0 &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/programs/$(programId));
+
+        allow update: if isValidId(programId) &&
+          isValidId(versionId) &&
+          isValidVersion(incoming(), programId) &&
+          incoming().id == existing().id &&
+          incoming().programId == existing().programId &&
+          incoming().authorId == existing().authorId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          (
+            (
+              isAdmin() &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'version', 'channel', 'fileName', 'fileSizeBytes', 'downloadUrl',
+                'sha256', 'signature', 'changelog', 'minOs', 'mandatory',
+                'isLatest', 'revoked', 'downloads', 'updatedAt'
+              ])
+            ) ||
+            (
+              isVerified() &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['downloads', 'updatedAt']) &&
+              incoming().downloads == existing().downloads + 1
+            )
+          );
+
+        allow delete: if isAdmin() && isValidId(programId) && isValidId(versionId);
+      }
+
+      // Program Comments Subcollection
+      match /comments/{commentId} {
+        allow get: if isValidId(programId) && isValidId(commentId);
+        allow list: if resource.data.programId == programId;
+
+        allow create: if isVerified() &&
+          isValidId(programId) &&
+          isValidId(commentId) &&
+          isValidComment(incoming(), programId) &&
+          incoming().id == commentId &&
+          incoming().authorId == request.auth.uid &&
+          (isAdmin() || (incoming().pinned == false && incoming().adminReply == '')) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/programs/$(programId));
+
+        allow update: if isVerified() &&
+          isValidId(programId) &&
+          isValidId(commentId) &&
+          isValidComment(incoming(), programId) &&
+          incoming().id == existing().id &&
+          incoming().programId == existing().programId &&
+          incoming().authorId == existing().authorId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          (
+            (
+              request.auth.uid == existing().authorId &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'body', 'rating', 'category', 'versionTag', 'updatedAt'
+              ])
+            ) ||
+            (
+              isAdmin() &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'pinned', 'adminReply', 'updatedAt'
+              ])
+            )
+          );
+
+        allow delete: if isVerified() &&
+          isValidId(programId) &&
+          isValidId(commentId) &&
+          (request.auth.uid == resource.data.authorId || isAdmin());
+      }
+    }
+  }
+}

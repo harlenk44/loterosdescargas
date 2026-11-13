@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function () {
+        function isExtensionError(filename, error) {
+          var src = typeof filename === 'string' ? filename : '';
+          var stack = error && typeof error.stack === 'string' ? error.stack : '';
+          return (
+            src.indexOf('chrome-extension://') === 0 ||
+            src.indexOf('moz-extension://') === 0 ||
+            src.indexOf('safari-extension://') === 0 ||
+            stack.indexOf('chrome-extension://') !== -1 ||
+            stack.indexOf('moz-extension://') !== -1
+          );
+        }
+        window.addEventListener(
+          'error',
+          function (event) {
+            if (isExtensionError(event.filename, event.error)) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+          },
+          true
+        );
+        window.addEventListener(
+          'unhandledrejection',
+          function (event) {
+            if (isExtensionError('', event.reason)) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+          },
+          true
+        );
+      })();
+    </script>
+    <title>LOTEROSDESCARGAS — Repositorio de Software de Lotería</title>
+    <meta
+      name="description"
+      content="Repositorio oficial de programas de venta de lotería, impresión térmica y utilidades para Windows y Android."
+    />
+    <meta property="og:title" content="LOTEROSDESCARGAS — Repositorio de Software de Lotería" />
+    <meta
+      property="og:description"
+      content="Repositorio oficial de programas de venta de lotería, impresión térmica y utilidades para Windows y Android."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="bg-[#02153A] text-white antialiased selection:bg-[#00A3FF]/30 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

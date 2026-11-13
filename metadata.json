@@ -1,0 +1,6 @@
+{
+  "name": "LOTEROSDESCARGAS",
+  "description": "Repositorio oficial de software para venta de lotería con gestión de versiones, verificación criptográfica SHA-256, comentarios y actualizaciones automáticas seguras.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

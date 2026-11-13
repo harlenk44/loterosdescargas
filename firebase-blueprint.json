@@ -1,0 +1,399 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized repository administrator who can publish programs, manage versions, and moderate comments.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the administrator."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Display name of the administrator."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when admin record was created."
+        }
+      },
+      "required": ["uid", "displayName", "createdAt"]
+    },
+    "Program": {
+      "title": "Program",
+      "description": "A lottery sales software package stored in the LOTEROSDESCARGAS repository.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique document ID."
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "pattern": "^[a-z0-9\\-]+$",
+          "description": "URL-safe identifier used in auto-update manifest endpoints."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Display name of the lottery software."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 240,
+          "description": "Short single-sentence summary of the program."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 4000,
+          "description": "Detailed technical and operational description."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Programas de Venta", "Impresión Térmica", "Utilidades y Drivers"],
+          "description": "Software category."
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["Windows", "Android"],
+          "description": "Target operating system."
+        },
+        "iconUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "URL or asset path to the program icon."
+        },
+        "imageUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "URL or asset path to the program cover or screenshot image."
+        },
+        "latestVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.]+)?$",
+          "description": "Current latest semantic version string."
+        },
+        "latestChannel": {
+          "type": "string",
+          "enum": ["Estable", "Beta", "Parche Crítico"],
+          "description": "Release channel of the latest version."
+        },
+        "downloadCount": {
+          "type": "integer",
+          "description": "Total accumulated downloads."
+        },
+        "commentCount": {
+          "type": "integer",
+          "description": "Total user comments on this program."
+        },
+        "autoUpdateEnabled": {
+          "type": "boolean",
+          "description": "Whether signed automatic update manifests are active."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Activo", "Archivado"],
+          "description": "Repository publication status."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the publisher."
+        },
+        "ownerName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Public publisher name."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update server timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "slug",
+        "name",
+        "summary",
+        "description",
+        "category",
+        "platform",
+        "iconUrl",
+        "imageUrl",
+        "latestVersion",
+        "latestChannel",
+        "downloadCount",
+        "commentCount",
+        "autoUpdateEnabled",
+        "status",
+        "ownerId",
+        "ownerName",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ProgramVersion": {
+      "title": "ProgramVersion",
+      "description": "A versioned binary release with cryptographic SHA-256 integrity and HMAC signature metadata.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique version document ID."
+        },
+        "programId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Parent program document ID."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.]+)?$",
+          "description": "Semantic version tag."
+        },
+        "channel": {
+          "type": "string",
+          "enum": ["Estable", "Beta", "Parche Crítico"],
+          "description": "Release channel."
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180,
+          "description": "Installer or package file name."
+        },
+        "fileSizeBytes": {
+          "type": "integer",
+          "description": "Exact byte size of the uploaded package."
+        },
+        "downloadUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Endpoint or URL to download the package."
+        },
+        "sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "SHA-256 cryptographic digest of the package."
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 128,
+          "pattern": "^[a-fA-F0-9]{64,128}$",
+          "description": "HMAC-SHA256 release signature for secure auto-updates."
+        },
+        "changelog": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 3000,
+          "description": "Release notes describing fixes and features."
+        },
+        "minOs": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Minimum supported OS requirement."
+        },
+        "mandatory": {
+          "type": "boolean",
+          "description": "Indicates if auto-update clients must enforce this update."
+        },
+        "isLatest": {
+          "type": "boolean",
+          "description": "Whether this version is currently the active latest release."
+        },
+        "revoked": {
+          "type": "boolean",
+          "description": "Whether this version has been revoked for security reasons."
+        },
+        "downloads": {
+          "type": "integer",
+          "description": "Downloads recorded for this specific version."
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the admin who published this version."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update server timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "programId",
+        "version",
+        "channel",
+        "fileName",
+        "fileSizeBytes",
+        "downloadUrl",
+        "sha256",
+        "signature",
+        "changelog",
+        "minOs",
+        "mandatory",
+        "isLatest",
+        "revoked",
+        "downloads",
+        "authorId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ProgramComment": {
+      "title": "ProgramComment",
+      "description": "User comment, review, or compatibility report on a repository program.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique comment document ID."
+        },
+        "programId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Parent program document ID."
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the commenter."
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Public display name of the commenter."
+        },
+        "versionTag": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Program version referenced by the comment."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Opinión", "Soporte", "Reporte de Error", "Sugerencia"],
+          "description": "Type of user comment."
+        },
+        "rating": {
+          "type": "integer",
+          "description": "User rating from 1 to 5."
+        },
+        "body": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 1200,
+          "description": "Comment body text."
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "Admin-pinned helpful comment flag."
+        },
+        "adminReply": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1000,
+          "description": "Optional official response from a repository administrator."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update server timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "programId",
+        "authorId",
+        "authorName",
+        "versionTag",
+        "category",
+        "rating",
+        "body",
+        "pinned",
+        "adminReply",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Administrator registry for LOTEROSDESCARGAS."
+    },
+    "/programs/{programId}": {
+      "schema": { "$ref": "#/entities/Program" },
+      "description": "Lottery software catalog entries."
+    },
+    "/programs/{programId}/versions/{versionId}": {
+      "schema": { "$ref": "#/entities/ProgramVersion" },
+      "description": "Versioned binary packages and cryptographic verification metadata for a program."
+    },
+    "/programs/{programId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/ProgramComment" },
+      "description": "User reviews, feedback, and support comments for a program."
+    }
+  }
+}
