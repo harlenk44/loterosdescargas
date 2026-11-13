@@ -149,8 +149,8 @@ const STARTER_DEFINITIONS: StarterSeedDef[] = [
     summary: 'Controlador universal USB y red para impresoras térmicas de 58mm y 80mm.',
     description:
       'Puente de impresión compatible con Epson, Star, Xprinter y modelos genéricos USB/Serial. Incluye calibración de márgenes, corte automático y plantillas de recibo con QR.',
-    category: 'Impresión Térmica',
-    platform: 'Windows',
+    category: 'Programas de Venta',
+    platform: 'Impresión',
     version: '3.0.2',
     channel: 'Estable',
     minOs: 'Windows 7 / 10 / 11',
@@ -167,8 +167,8 @@ const STARTER_DEFINITIONS: StarterSeedDef[] = [
     summary: 'Servicio de impresión térmica Bluetooth 58mm para celulares y Handheld POS.',
     description:
       'Conector rápido para impresoras portátiles térmicas en Android. Configura encabezados de agencia, códigos QR y tamaño de papel en segundos.',
-    category: 'Impresión Térmica',
-    platform: 'Android',
+    category: 'Programas de Venta',
+    platform: 'Impresión',
     version: '1.8.0',
     channel: 'Estable',
     minOs: 'Android 8.0 o superior',
@@ -192,8 +192,8 @@ const STARTER_DEFINITIONS: StarterSeedDef[] = [
     summary: 'Asistencia remota segura y copia de seguridad automática para cajas de lotería.',
     description:
       'Herramienta de utilidades para técnicos de bancas: respalda bases de datos locales y habilita acceso remoto seguro para soporte técnico inmediato en Windows.',
-    category: 'Utilidades y Drivers',
-    platform: 'Windows',
+    category: 'Programas de Venta',
+    platform: 'Utilidades',
     version: '1.9.0',
     channel: 'Estable',
     minOs: 'Windows 10 / 11',
@@ -284,6 +284,8 @@ async function ensureStarterFiles() {
   return STARTER_CATALOG_CACHE;
 }
 
+const verifiedTokenCache = new Map<string, { uid: string; email: string; expiresAt: number }>();
+
 async function verifyFirebaseUser(req: Request): Promise<{ uid: string; email: string } | null> {
   const customHeader = req.headers['x-firebase-auth'];
   const rawAuth =
@@ -295,6 +297,12 @@ async function verifyFirebaseUser(req: Request): Promise<{ uid: string; email: s
   if (!rawAuth) return null;
   const idToken = rawAuth.startsWith('Bearer ') ? rawAuth.slice(7).trim() : rawAuth;
   if (!idToken) return null;
+
+  const tokenHash = crypto.createHash('sha256').update(idToken).digest('hex');
+  const cached = verifiedTokenCache.get(tokenHash);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { uid: cached.uid, email: cached.email };
+  }
 
   try {
     const res = await fetch(
@@ -311,6 +319,14 @@ async function verifyFirebaseUser(req: Request): Promise<{ uid: string; email: s
     };
     const user = data.users?.[0];
     if (!user || !user.localId || !user.email || !user.emailVerified) return null;
+    if (verifiedTokenCache.size > 200) {
+      verifiedTokenCache.clear();
+    }
+    verifiedTokenCache.set(tokenHash, {
+      uid: user.localId,
+      email: user.email,
+      expiresAt: Date.now() + 3 * 60 * 1000,
+    });
     return { uid: user.localId, email: user.email };
   } catch {
     return null;
@@ -587,6 +603,45 @@ async function startServer() {
       });
     }
   });
+
+  // Chunked upload via raw binary octet-stream (fast, no +33% base64 bloat or JSON WAF false positives)
+  app.post(
+    '/api/upload-chunk-bin',
+    express.raw({ type: 'application/octet-stream', limit: '2mb' }),
+    async (req: Request, res: Response) => {
+      try {
+        const user = await verifyFirebaseUser(req);
+        if (!user || !(await isAuthorizedAdmin(user))) {
+          res.status(403).json({ error: 'Acceso denegado. Se requiere cuenta de administrador verificada.' });
+          return;
+        }
+
+        const uploadId = sanitizeSegment(String(req.query.uploadId || ''), '');
+        const chunkIndex = Number(req.query.chunkIndex);
+        if (
+          !uploadId ||
+          !Number.isInteger(chunkIndex) ||
+          chunkIndex < 0 ||
+          !Buffer.isBuffer(req.body) ||
+          req.body.length === 0
+        ) {
+          res.status(400).json({ error: 'Parámetros o datos binarios del fragmento inválidos.' });
+          return;
+        }
+
+        const chunkDir = path.join(TEMP_UPLOADS_DIR, 'chunks', uploadId);
+        fs.mkdirSync(chunkDir, { recursive: true });
+        const chunkPath = path.join(chunkDir, String(chunkIndex));
+        fs.writeFileSync(chunkPath, req.body);
+
+        res.json({ received: true, chunkIndex });
+      } catch (err) {
+        res.status(500).json({
+          error: err instanceof Error ? err.message : 'Error recibiendo fragmento del archivo.',
+        });
+      }
+    }
+  );
 
   // Chunked upload via JSON base64 (avoids proxy multipart & Authorization issues)
   app.post('/api/upload-chunk-json', async (req: Request, res: Response) => {

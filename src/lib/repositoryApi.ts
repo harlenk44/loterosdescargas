@@ -2,10 +2,12 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
   writeBatch,
@@ -14,6 +16,7 @@ import {
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import {
   BOOTSTRAPPED_ADMIN_EMAIL,
+  DEFAULT_FEATURED_LINK,
   SCHEMA_LIMITS,
   SCHEMA_PATTERNS,
   type AutoUpdateCheckResponse,
@@ -24,7 +27,11 @@ import {
   type ProgramRecord,
   type ProgramStatus,
   type ProgramVersionRecord,
+  type PromotionPlacement,
+  type PromotionRecord,
+  type PromotionStatus,
   type ReleaseChannel,
+  type SiteSettingsRecord,
   type StarterProgramItem,
   type UploadPackageResult,
 } from '../types/repository';
@@ -49,9 +56,10 @@ export function subscribePrograms(
     (snapshot) => {
       const items = snapshot.docs.map((d) => d.data() as ProgramRecord);
       items.sort((a, b) => {
-        const ta = a.updatedAt?.toMillis?.() ?? 0;
-        const tb = b.updatedAt?.toMillis?.() ?? 0;
-        return tb - ta;
+        const ta = a.createdAt?.toMillis?.() ?? a.updatedAt?.toMillis?.() ?? 0;
+        const tb = b.createdAt?.toMillis?.() ?? b.updatedAt?.toMillis?.() ?? 0;
+        if (tb !== ta) return tb - ta;
+        return a.id.localeCompare(b.id);
       });
       onData(items);
     },
@@ -170,6 +178,73 @@ async function parseJsonResponse<T>(
   return (data ?? {}) as T;
 }
 
+const MAX_PERSISTENT_DATA_URL_CHARS = 280_000;
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo de imagen.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function encodeImageToPersistentDataUrl(
+  file: File,
+  kind: 'icon' | 'cover' | 'banner'
+): Promise<string | null> {
+  if (file.type === 'image/svg+xml' || file.type === 'image/gif' || file.type === 'image/x-icon') {
+    const direct = await blobToDataUrl(file);
+    return direct.length <= MAX_PERSISTENT_DATA_URL_CHARS ? direct : null;
+  }
+
+  return new Promise<string | null>((resolve) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const maxWidth = kind === 'banner' ? 1280 : 600;
+      const maxHeight = kind === 'banner' ? 640 : 600;
+      let scale = Math.min(1, maxWidth / img.width, maxHeight / img.height);
+      const qualities = [0.88, 0.78, 0.66, 0.54, 0.42];
+
+      const attemptDraw = (currentScale: number): string | null => {
+        const width = Math.max(1, Math.round(img.width * currentScale));
+        const height = Math.max(1, Math.round(img.height * currentScale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+        ctx.drawImage(img, 0, 0, width, height);
+
+        for (const q of qualities) {
+          const webp = canvas.toDataURL('image/webp', q);
+          if (webp.startsWith('data:image/webp') && webp.length <= MAX_PERSISTENT_DATA_URL_CHARS) {
+            return webp;
+          }
+        }
+        const jpeg = canvas.toDataURL('image/jpeg', 0.72);
+        if (jpeg.length <= MAX_PERSISTENT_DATA_URL_CHARS) {
+          return jpeg;
+        }
+        return null;
+      };
+
+      let encoded = attemptDraw(scale);
+      if (!encoded) {
+        encoded = attemptDraw(scale * 0.72);
+      }
+      resolve(encoded);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(null);
+    };
+    img.src = objectUrl;
+  });
+}
+
 async function prepareImageForUpload(file: File): Promise<File> {
   const maxDirectBytes = 900 * 1024;
   if (
@@ -220,9 +295,18 @@ async function prepareImageForUpload(file: File): Promise<File> {
   });
 }
 
-export async function uploadMediaImage(file: File, kind: 'icon' | 'cover'): Promise<string> {
+export async function uploadMediaImage(
+  file: File,
+  kind: 'icon' | 'cover' | 'banner'
+): Promise<string> {
   const user = auth.currentUser;
   if (!user) throw new Error('Debes iniciar sesión como administrador para subir imágenes.');
+
+  const persistentDataUrl = await encodeImageToPersistentDataUrl(file, kind);
+  if (persistentDataUrl) {
+    return persistentDataUrl;
+  }
+
   const token = await user.getIdToken();
   const readyFile = await prepareImageForUpload(file);
   const base64Data = await blobToBase64(readyFile);
@@ -248,7 +332,69 @@ export async function uploadMediaImage(file: File, kind: 'icon' | 'cover'): Prom
   return data.mediaUrl;
 }
 
-const CHUNK_SIZE_BYTES = 512 * 1024; // 512 KB binary (~682 KB base64 JSON) per request
+const CHUNK_SIZE_BYTES = 512 * 1024; // 512 KB raw binary per request (safe under 1 MB proxy limit)
+const CHUNK_CONCURRENCY = 3;
+
+async function uploadSingleChunkWithRetry(
+  slice: Blob,
+  uploadId: string,
+  chunkIndex: number,
+  totalChunks: number,
+  getToken: (forceRefresh?: boolean) => Promise<string>
+): Promise<void> {
+  const maxAttempts = 4;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const forceRefresh = attempt > 0;
+    const token = await getToken(forceRefresh);
+
+    // On final retry after a 403/415 on binary endpoint, try JSON base64 fallback
+    const useJsonFallback = attempt === maxAttempts - 1 && lastError?.message.includes('HTTP 403');
+
+    try {
+      const response = useJsonFallback
+        ? await fetch('/api/upload-chunk-json', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Firebase-Auth': token,
+            },
+            body: JSON.stringify({
+              uploadId,
+              chunkIndex,
+              base64Data: await blobToBase64(slice),
+            }),
+          })
+        : await fetch(
+            `/api/upload-chunk-bin?uploadId=${encodeURIComponent(uploadId)}&chunkIndex=${chunkIndex}`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/octet-stream',
+                'X-Firebase-Auth': token,
+              },
+              body: slice,
+            }
+          );
+
+      await parseJsonResponse<{ received: boolean }>(
+        response,
+        `Error subiendo fragmento ${chunkIndex + 1} de ${totalChunks}.`,
+        useJsonFallback ? '/api/upload-chunk-json' : '/api/upload-chunk-bin'
+      );
+      return;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < maxAttempts - 1) {
+        const delayMs = 600 * (attempt + 1);
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+
+  throw lastError ?? new Error(`Error subiendo fragmento ${chunkIndex + 1} de ${totalChunks}.`);
+}
 
 export async function uploadBinaryPackage(
   file: File,
@@ -258,45 +404,46 @@ export async function uploadBinaryPackage(
 ): Promise<UploadPackageResult> {
   const user = auth.currentUser;
   if (!user) throw new Error('Debes iniciar sesión como administrador para subir archivos.');
-  const token = await user.getIdToken();
+
+  let cachedToken = await user.getIdToken();
+  const getToken = async (forceRefresh = false): Promise<string> => {
+    if (forceRefresh) {
+      cachedToken = await user.getIdToken(true);
+    }
+    return cachedToken;
+  };
 
   const uploadId = makeSafeId('upl');
   const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE_BYTES));
+  let completedChunks = 0;
+  let nextIndex = 0;
 
-  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-    const start = chunkIndex * CHUNK_SIZE_BYTES;
-    const end = Math.min(file.size, start + CHUNK_SIZE_BYTES);
-    const slice = file.slice(start, end);
-    const base64Data = await blobToBase64(slice);
+  const worker = async () => {
+    while (true) {
+      const chunkIndex = nextIndex++;
+      if (chunkIndex >= totalChunks) return;
 
-    const chunkRes = await fetch('/api/upload-chunk-json', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Firebase-Auth': token,
-      },
-      body: JSON.stringify({
-        uploadId,
-        chunkIndex,
-        base64Data,
-      }),
-    });
+      const start = chunkIndex * CHUNK_SIZE_BYTES;
+      const end = Math.min(file.size, start + CHUNK_SIZE_BYTES);
+      const slice = file.slice(start, end);
 
-    await parseJsonResponse<{ received: boolean }>(
-      chunkRes,
-      `Error subiendo fragmento ${chunkIndex + 1} de ${totalChunks}.`,
-      '/api/upload-chunk-json'
-    );
+      await uploadSingleChunkWithRetry(slice, uploadId, chunkIndex, totalChunks, getToken);
 
-    const pct = Math.min(95, Math.round(((chunkIndex + 1) / totalChunks) * 95));
-    onProgress?.(pct);
-  }
+      completedChunks++;
+      const pct = Math.min(95, Math.round((completedChunks / totalChunks) * 95));
+      onProgress?.(pct);
+    }
+  };
 
+  const workers = Array.from({ length: Math.min(CHUNK_CONCURRENCY, totalChunks) }, () => worker());
+  await Promise.all(workers);
+
+  const finalToken = await user.getIdToken(true);
   const finalizeRes = await fetch('/api/upload-finalize', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Firebase-Auth': token,
+      'X-Firebase-Auth': finalToken,
     },
     body: JSON.stringify({
       uploadId,
@@ -794,4 +941,255 @@ export async function verifyUpdateSignature(payload: {
     body: JSON.stringify(payload),
   });
   return (await res.json()) as { valid: boolean; algorithm: string; expectedPrefix?: string };
+}
+
+export function normalizeExternalUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (/^(javascript|data|vbscript):/i.test(trimmed)) {
+    throw new Error('Por seguridad, ingresa una dirección web válida (https://...).');
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed.slice(0, SCHEMA_LIMITS.URL_MAX);
+  }
+  return `https://${trimmed}`.slice(0, SCHEMA_LIMITS.URL_MAX);
+}
+
+export function subscribeSiteSettings(
+  onData: (settings: SiteSettingsRecord) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const path = 'siteSettings/main';
+  return onSnapshot(
+    doc(db, 'siteSettings', 'main'),
+    (snap) => {
+      if (!snap.exists()) {
+        onData({
+          id: 'main',
+          featuredLinkLabel: DEFAULT_FEATURED_LINK.label,
+          featuredLinkUrl: DEFAULT_FEATURED_LINK.url,
+          featuredLinkImageUrl: DEFAULT_FEATURED_LINK.imageUrl,
+          updatedBy: '',
+        });
+        return;
+      }
+      const data = snap.data() as SiteSettingsRecord;
+      onData({
+        ...data,
+        featuredLinkImageUrl: data.featuredLinkImageUrl || '',
+      });
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch (wrapped) {
+        if (onError) onError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+      }
+    }
+  );
+}
+
+export async function saveFeaturedLinkSettings(input: {
+  label: string;
+  url: string;
+  imageUrl?: string;
+}): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sesión de administrador requerida.');
+
+  const cleanLabel = input.label.trim().slice(0, SCHEMA_LIMITS.SITE_LINK_LABEL_MAX);
+  const cleanUrl = normalizeExternalUrl(input.url);
+  const cleanImageUrl = (input.imageUrl ?? '').trim().slice(0, SCHEMA_LIMITS.MEDIA_URL_MAX);
+
+  if (cleanLabel.length < 2) {
+    throw new Error('El texto del botón debe tener al menos 2 caracteres.');
+  }
+  if (cleanUrl.length < 8) {
+    throw new Error('Ingresa una dirección web válida (ej. pizarraanimalspot.ai.studio).');
+  }
+
+  const ref = doc(db, 'siteSettings', 'main');
+  try {
+    const existingSnap = await getDoc(ref);
+    if (!existingSnap.exists()) {
+      await setDoc(ref, {
+        id: 'main',
+        featuredLinkLabel: cleanLabel,
+        featuredLinkUrl: cleanUrl,
+        featuredLinkImageUrl: cleanImageUrl,
+        updatedBy: user.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await updateDoc(ref, {
+        featuredLinkLabel: cleanLabel,
+        featuredLinkUrl: cleanUrl,
+        featuredLinkImageUrl: cleanImageUrl,
+        updatedBy: user.uid,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'siteSettings/main');
+  }
+}
+
+export function subscribePromotions(
+  includePaused: boolean,
+  onData: (promotions: PromotionRecord[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const path = 'promotions';
+  let activeItems: PromotionRecord[] = [];
+  let pausedItems: PromotionRecord[] = [];
+
+  const emitMerged = () => {
+    const byId = new Map<string, PromotionRecord>();
+    for (const item of [...activeItems, ...pausedItems]) {
+      byId.set(item.id, item);
+    }
+    const merged = Array.from(byId.values());
+    merged.sort((a, b) => {
+      const ta = a.updatedAt?.toMillis?.() ?? a.createdAt?.toMillis?.() ?? 0;
+      const tb = b.updatedAt?.toMillis?.() ?? b.createdAt?.toMillis?.() ?? 0;
+      return tb - ta;
+    });
+    onData(merged);
+  };
+
+  const activeQuery = query(collection(db, path), where('status', '==', 'Activo'));
+  const unsubActive = onSnapshot(
+    activeQuery,
+    (snapshot) => {
+      activeItems = snapshot.docs.map((d) => d.data() as PromotionRecord);
+      emitMerged();
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        if (onError) onError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+      }
+    }
+  );
+
+  if (!includePaused) {
+    return unsubActive;
+  }
+
+  const pausedQuery = query(collection(db, path), where('status', '==', 'Pausado'));
+  const unsubPaused = onSnapshot(
+    pausedQuery,
+    (snapshot) => {
+      pausedItems = snapshot.docs.map((d) => d.data() as PromotionRecord);
+      emitMerged();
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        if (onError) onError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+      }
+    }
+  );
+
+  return () => {
+    unsubActive();
+    unsubPaused();
+  };
+}
+
+export async function createPromotion(input: {
+  title: string;
+  subtitle: string;
+  badgeText: string;
+  imageUrl: string;
+  linkUrl: string;
+  placement: PromotionPlacement;
+  status: PromotionStatus;
+}): Promise<string> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sesión de administrador requerida.');
+
+  const cleanTitle = input.title.trim().slice(0, SCHEMA_LIMITS.PROMO_TITLE_MAX);
+  if (cleanTitle.length < 2) {
+    throw new Error('Escribe un título para la publicidad (mínimo 2 caracteres).');
+  }
+
+  const cleanLink = input.linkUrl.trim() ? normalizeExternalUrl(input.linkUrl) : '';
+  const promoId = makeSafeId('ad');
+
+  try {
+    await setDoc(doc(db, 'promotions', promoId), {
+      id: promoId,
+      title: cleanTitle,
+      subtitle: input.subtitle.trim().slice(0, SCHEMA_LIMITS.PROMO_SUBTITLE_MAX),
+      badgeText: input.badgeText.trim().slice(0, SCHEMA_LIMITS.PROMO_BADGE_MAX),
+      imageUrl: input.imageUrl.trim().slice(0, SCHEMA_LIMITS.MEDIA_URL_MAX),
+      linkUrl: cleanLink,
+      placement: input.placement,
+      status: input.status,
+      ownerId: user.uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return promoId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `promotions/${promoId}`);
+  }
+}
+
+export async function updatePromotion(
+  promoId: string,
+  patch: Partial<{
+    title: string;
+    subtitle: string;
+    badgeText: string;
+    imageUrl: string;
+    linkUrl: string;
+    placement: PromotionPlacement;
+    status: PromotionStatus;
+  }>
+): Promise<void> {
+  const payload: Record<string, unknown> = {
+    updatedAt: serverTimestamp(),
+  };
+  if (patch.title !== undefined) {
+    const t = patch.title.trim().slice(0, SCHEMA_LIMITS.PROMO_TITLE_MAX);
+    if (t.length < 2) throw new Error('El título debe tener al menos 2 caracteres.');
+    payload.title = t;
+  }
+  if (patch.subtitle !== undefined) {
+    payload.subtitle = patch.subtitle.trim().slice(0, SCHEMA_LIMITS.PROMO_SUBTITLE_MAX);
+  }
+  if (patch.badgeText !== undefined) {
+    payload.badgeText = patch.badgeText.trim().slice(0, SCHEMA_LIMITS.PROMO_BADGE_MAX);
+  }
+  if (patch.imageUrl !== undefined) {
+    payload.imageUrl = patch.imageUrl.trim().slice(0, SCHEMA_LIMITS.MEDIA_URL_MAX);
+  }
+  if (patch.linkUrl !== undefined) {
+    payload.linkUrl = patch.linkUrl.trim() ? normalizeExternalUrl(patch.linkUrl) : '';
+  }
+  if (patch.placement !== undefined) {
+    payload.placement = patch.placement;
+  }
+  if (patch.status !== undefined) {
+    payload.status = patch.status;
+  }
+
+  try {
+    await updateDoc(doc(db, 'promotions', promoId), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `promotions/${promoId}`);
+  }
+}
+
+export async function deletePromotion(promoId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'promotions', promoId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `promotions/${promoId}`);
+  }
 }

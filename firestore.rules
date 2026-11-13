@@ -53,9 +53,9 @@ service cloud.firestore {
         data.summary is string && data.summary.size() >= 5 && data.summary.size() <= 240 &&
         data.description is string && data.description.size() >= 10 && data.description.size() <= 4000 &&
         data.category in ['Programas de Venta', 'Punto de Venta', 'Impresión Térmica', 'Utilidades y Drivers'] &&
-        data.platform in ['Windows', 'Android'] &&
-        data.iconUrl is string && data.iconUrl.size() <= 500 &&
-        data.imageUrl is string && data.imageUrl.size() <= 500 &&
+        data.platform in ['Windows', 'Android', 'Utilidades', 'Impresión'] &&
+        data.iconUrl is string && data.iconUrl.size() <= 350000 &&
+        data.imageUrl is string && data.imageUrl.size() <= 350000 &&
         data.latestVersion is string && data.latestVersion.size() >= 1 && data.latestVersion.size() <= 32 &&
         data.latestVersion.matches('^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.]+)?$') &&
         data.latestChannel in ['Estable', 'Beta', 'Parche Crítico'] &&
@@ -126,6 +126,44 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidSiteSettings(data) {
+      return data.keys().hasAll([
+          'id', 'featuredLinkLabel', 'featuredLinkUrl', 'featuredLinkImageUrl', 'updatedBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'featuredLinkLabel', 'featuredLinkUrl', 'featuredLinkImageUrl', 'updatedBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.id == 'main' &&
+        data.featuredLinkLabel is string && data.featuredLinkLabel.size() >= 2 && data.featuredLinkLabel.size() <= 80 &&
+        data.featuredLinkUrl is string && data.featuredLinkUrl.size() >= 8 && data.featuredLinkUrl.size() <= 500 &&
+        data.featuredLinkImageUrl is string && data.featuredLinkImageUrl.size() <= 350000 &&
+        isValidId(data.updatedBy) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPromotion(data) {
+      return data.keys().hasAll([
+          'id', 'title', 'subtitle', 'badgeText', 'imageUrl', 'linkUrl',
+          'placement', 'status', 'ownerId', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'title', 'subtitle', 'badgeText', 'imageUrl', 'linkUrl',
+          'placement', 'status', 'ownerId', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 100 &&
+        data.subtitle is string && data.subtitle.size() <= 240 &&
+        data.badgeText is string && data.badgeText.size() <= 40 &&
+        data.imageUrl is string && data.imageUrl.size() <= 350000 &&
+        data.linkUrl is string && data.linkUrl.size() <= 500 &&
+        data.placement in ['banner', 'tarjeta'] &&
+        data.status in ['Activo', 'Pausado'] &&
+        isValidId(data.ownerId) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     // --- Collection Rules ---
 
     // Administrators Registry (Locked down: single owner enforced directly)
@@ -192,7 +230,7 @@ service cloud.firestore {
           incoming().downloads == 0 &&
           incoming().createdAt == request.time &&
           incoming().updatedAt == request.time &&
-          exists(/databases/$(database)/documents/programs/$(programId));
+          existsAfter(/databases/$(database)/documents/programs/$(programId));
 
         allow update: if isValidId(programId) &&
           isValidId(versionId) &&
@@ -266,6 +304,61 @@ service cloud.firestore {
           isValidId(commentId) &&
           (request.auth.uid == resource.data.authorId || isAdmin());
       }
+    }
+
+    // Configurable Site Settings (Featured External Button Link)
+    match /siteSettings/{settingId} {
+      allow get: if settingId == 'main';
+      allow list: if false;
+
+      allow create: if isAdmin() &&
+        settingId == 'main' &&
+        isValidSiteSettings(incoming()) &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isAdmin() &&
+        settingId == 'main' &&
+        isValidSiteSettings(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'featuredLinkLabel', 'featuredLinkUrl', 'featuredLinkImageUrl', 'updatedBy', 'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    // Promotional Banners & Ads
+    match /promotions/{promoId} {
+      allow get: if isValidId(promoId) && (resource.data.status == 'Activo' || isAdmin());
+      allow list: if resource.data.status == 'Activo' ||
+        (isAdmin() && resource.data.status == 'Pausado');
+
+      allow create: if isAdmin() &&
+        isValidId(promoId) &&
+        isValidPromotion(incoming()) &&
+        incoming().id == promoId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isAdmin() &&
+        isValidId(promoId) &&
+        isValidPromotion(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'subtitle', 'badgeText', 'imageUrl', 'linkUrl',
+          'placement', 'status', 'updatedAt'
+        ]);
+
+      allow delete: if isAdmin() && isValidId(promoId);
     }
   }
 }

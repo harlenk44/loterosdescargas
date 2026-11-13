@@ -53,15 +53,13 @@ interface ProgramDetailViewProps {
 
 type DetailTab = 'resumen' | 'comentarios';
 
-function normalizeCategory(raw: string): ProgramCategory {
-  if (raw === 'Punto de Venta' || raw === 'Programas de Venta') return 'Programas de Venta';
-  if (raw === 'Impresión Térmica') return 'Impresión Térmica';
-  if (raw === 'Utilidades y Drivers') return 'Utilidades y Drivers';
+function normalizeCategory(_raw: string): ProgramCategory {
   return 'Programas de Venta';
 }
 
 function normalizePlatform(raw: string): ProgramPlatform {
-  return raw === 'Android' ? 'Android' : 'Windows';
+  if (raw === 'Android' || raw === 'Utilidades' || raw === 'Impresión') return raw;
+  return 'Windows';
 }
 
 export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
@@ -519,16 +517,22 @@ export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
                   : program.name
               }
               aria-label={`Descargar ${program.name}`}
-              className="group relative w-32 h-32 sm:w-36 sm:h-36 shrink-0 bg-white border border-blue-100 rounded-2xl p-2.5 shadow-sm hover:border-[#0052CC] hover:shadow-md transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0052CC]"
+              className="group relative w-32 h-32 sm:w-36 sm:h-36 shrink-0 bg-[#031B49]/85 border border-[#00A3FF]/40 rounded-2xl overflow-hidden shadow-sm hover:border-[#7FE000] hover:shadow-md transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0052CC]"
             >
               <img
                 src={displayCover}
                 alt={`Botón de descarga de ${program.name}`}
                 referrerPolicy="no-referrer"
-                className="w-full h-full object-cover rounded-xl group-hover:scale-[1.03] transition-transform duration-200"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (target.src !== defaults.imageUrl) {
+                    target.src = defaults.imageUrl;
+                  }
+                }}
+                className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-200"
               />
               {latestVersionObj && (
-                <span className="absolute inset-x-2.5 bottom-2.5 py-1 px-2 rounded-lg bg-[#0046AD]/90 text-white text-[11px] font-semibold flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity">
+                <span className="absolute inset-x-2 bottom-2 py-1 px-2 rounded-lg bg-[#031B49]/95 border border-[#00A3FF]/40 text-white text-[11px] font-semibold flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity">
                   <Download className="w-3 h-3 text-[#7FE000]" />
                   Descargar
                 </span>

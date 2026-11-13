@@ -44,7 +44,7 @@ export function getDefaultMediaForProgram(slugOrCategory: string): { iconUrl: st
   return { iconUrl: posIcon, imageUrl: posIcon };
 }
 
-export function getDefaultMediaByCategory(category: ProgramCategory): { iconUrl: string; imageUrl: string } {
+export function getDefaultMediaByCategory(category: ProgramCategory | string): { iconUrl: string; imageUrl: string } {
   switch (category) {
     case 'Impresión Térmica':
       return { iconUrl: printerIcon, imageUrl: printerIcon };

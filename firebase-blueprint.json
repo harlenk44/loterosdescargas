@@ -65,25 +65,25 @@
         },
         "category": {
           "type": "string",
-          "enum": ["Programas de Venta", "Impresión Térmica", "Utilidades y Drivers"],
+          "enum": ["Programas de Venta"],
           "description": "Software category."
         },
         "platform": {
           "type": "string",
-          "enum": ["Windows", "Android"],
-          "description": "Target operating system."
+          "enum": ["Windows", "Android", "Utilidades", "Impresión"],
+          "description": "Target operating system or section."
         },
         "iconUrl": {
           "type": "string",
           "minLength": 0,
-          "maxLength": 500,
-          "description": "URL or asset path to the program icon."
+          "maxLength": 350000,
+          "description": "URL, Data URL, or asset path to the program icon."
         },
         "imageUrl": {
           "type": "string",
           "minLength": 0,
-          "maxLength": 500,
-          "description": "URL or asset path to the program cover or screenshot image."
+          "maxLength": 350000,
+          "description": "URL, Data URL, or asset path to the program cover or screenshot image."
         },
         "latestVersion": {
           "type": "string",
@@ -376,6 +376,148 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "Configurable featured shortcut button and site destination link managed by the repository owner.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Settings document ID (main)."
+        },
+        "featuredLinkLabel": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Label displayed on the featured external link button."
+        },
+        "featuredLinkUrl": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 500,
+          "description": "Target URL opened by the featured button."
+        },
+        "featuredLinkImageUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 350000,
+          "description": "Optional custom image or icon displayed on the featured button."
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the admin who updated settings."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update server timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "featuredLinkLabel",
+        "featuredLinkUrl",
+        "featuredLinkImageUrl",
+        "updatedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Promotion": {
+      "title": "Promotion",
+      "description": "Promotional banner or card advertisement published on the repository page.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique promotion document ID."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Advertisement title."
+        },
+        "subtitle": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 240,
+          "description": "Optional descriptive subtitle."
+        },
+        "badgeText": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 40,
+          "description": "Optional label badge."
+        },
+        "imageUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 350000,
+          "description": "URL, Data URL, or uploaded image path for the advertisement."
+        },
+        "linkUrl": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "Optional external destination URL when clicked."
+        },
+        "placement": {
+          "type": "string",
+          "enum": ["banner", "tarjeta"],
+          "description": "Visual layout format of the promotion."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Activo", "Pausado"],
+          "description": "Visibility status of the promotion."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the admin who created the promotion."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update server timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "subtitle",
+        "badgeText",
+        "imageUrl",
+        "linkUrl",
+        "placement",
+        "status",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -394,6 +536,14 @@
     "/programs/{programId}/comments/{commentId}": {
       "schema": { "$ref": "#/entities/ProgramComment" },
       "description": "User reviews, feedback, and support comments for a program."
+    },
+    "/siteSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/SiteSettings" },
+      "description": "Site-wide configurable shortcut link settings."
+    },
+    "/promotions/{promoId}": {
+      "schema": { "$ref": "#/entities/Promotion" },
+      "description": "Promotional banners and advertisements shown on the repository page."
     }
   }
 }

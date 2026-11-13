@@ -1,11 +1,43 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import { getApp, getApps, initializeApp } from 'firebase/app';
+import {
+  browserLocalPersistence,
+  getAuth,
+  GoogleAuthProvider,
+  setPersistence,
+} from 'firebase/auth';
+import {
+  doc,
+  getDocFromServer,
+  getFirestore,
+  initializeFirestore,
+} from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
+function createFirestoreDb() {
+  if (typeof window === 'undefined') {
+    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  }
+  try {
+    return initializeFirestore(
+      app,
+      {
+        experimentalForceLongPolling: true,
+        experimentalLongPollingOptions: { timeoutSeconds: 25 },
+      },
+      firebaseConfig.firestoreDatabaseId
+    );
+  } catch {
+    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  }
+}
+
+export const db = createFirestoreDb();
 export const auth = getAuth(app);
+void setPersistence(auth, browserLocalPersistence).catch(() => {
+  // Fallback to default persistence if restricted by browser storage policy
+});
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 

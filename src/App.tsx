@@ -2,17 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
   Download,
+  ExternalLink,
   FolderArchive,
   Image as ImageIcon,
-  LayoutGrid,
   Lock,
-  Monitor,
+  Megaphone,
   PackagePlus,
-  Printer,
   Search,
   ShieldCheck,
   Trash2,
-  Wrench,
 } from 'lucide-react';
 import { auth, googleProvider } from './lib/firebase';
 import {
@@ -23,34 +21,26 @@ import {
   recordProgramDownload,
   subscribePrograms,
   subscribeProgramVersions,
+  subscribePromotions,
   updateProgramSettings,
   uploadMediaImage,
 } from './lib/repositoryApi';
 import {
   PROGRAM_PLATFORMS,
-  type ProgramCategory,
+  type ProgramPlatform,
   type ProgramRecord,
   type ProgramVersionRecord,
+  type PromotionRecord,
   type StarterProgramItem,
 } from './types/repository';
 import { TopBar, type AppSection } from './components/TopBar';
 import { ProgramUploadForm } from './components/ProgramUploadForm';
 import { ProgramDetailView } from './components/ProgramDetailView';
+import { PromotionsManager } from './components/PromotionsManager';
 import { getDefaultMediaForProgram } from './lib/programMedia';
 
 const LOGO_URL = '/assets/aistudio/Loteros_Descargas__Logo_Tecnol_gico_06091cd3.png';
 const PAGE_BG_URL = '/assets/aistudio/Gemini_Generated_Image_gezu0vgezu0vgezu_bd6c7c79.jfif';
-
-const FEATURED_CATEGORIES: Array<{
-  id: 'Todos' | ProgramCategory;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-}> = [
-  { id: 'Todos', label: 'Todos los Programas', icon: LayoutGrid },
-  { id: 'Programas de Venta', label: 'Programas de Venta', icon: Monitor },
-  { id: 'Impresión Térmica', label: 'Impresión Térmica', icon: Printer },
-  { id: 'Utilidades y Drivers', label: 'Utilidades y Drivers', icon: Wrench },
-];
 
 export default function App() {
   const [activeSection, setActiveSection] = useState<AppSection>('catalogo');
@@ -60,7 +50,9 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [popupBlocked, setPopupBlocked] = useState(false);
 
   // Catalog Data State
   const [programs, setPrograms] = useState<ProgramRecord[]>([]);
@@ -69,9 +61,11 @@ export default function App() {
   const [importingAllStarter, setImportingAllStarter] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
 
+  // Promotions State
+  const [promotions, setPromotions] = useState<PromotionRecord[]>([]);
+
   // Filters & Quick Owner Controls
   const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<'Todos' | ProgramCategory>('Todos');
   const [platformFilter, setPlatformFilter] = useState<string>('Todas');
   const [hideStarter, setHideStarter] = useState<boolean>(() => {
     try {
@@ -83,6 +77,9 @@ export default function App() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [updatingImageId, setUpdatingImageId] = useState<string | null>(null);
+  const [brokenImageIds, setBrokenImageIds] = useState<Record<string, boolean>>({});
+  const [updatingPlatformId, setUpdatingPlatformId] = useState<string | null>(null);
+  const [optimisticPlatforms, setOptimisticPlatforms] = useState<Record<string, ProgramPlatform>>({});
   const [downloadFeedback, setDownloadFeedback] = useState<string | null>(null);
 
   // Version cache per program for direct square-image downloads
@@ -117,17 +114,40 @@ export default function App() {
       (list) => {
         setPrograms(list);
         setProgramsLoading(false);
+        setDataError(null);
       },
       (err) => {
-        setDataError(err.message);
+        const msg = err.message.includes('Missing or insufficient permissions')
+          ? 'No tienes permisos para leer el catálogo en este momento. Recarga o inicia sesión.'
+          : err.message;
+        setDataError(msg);
         setProgramsLoading(false);
       }
     );
 
     void fetchStarterCatalog().then(setStarterItems);
 
-    return () => unsubPrograms();
+    return () => {
+      unsubPrograms();
+    };
   }, []);
+
+  useEffect(() => {
+    if (authLoading) return;
+    const unsubPromos = subscribePromotions(
+      isAdmin,
+      (list) => {
+        setPromotions(list);
+      },
+      (err) => {
+        const msg = err.message.includes('Missing or insufficient permissions')
+          ? 'No se pudo cargar la publicidad por permisos de sesión. Intenta cerrar y volver a iniciar sesión.'
+          : err.message;
+        setDataError((prev) => prev || msg);
+      }
+    );
+    return () => unsubPromos();
+  }, [isAdmin, authLoading]);
 
   useEffect(() => {
     if (programs.length === 0) return;
@@ -142,24 +162,47 @@ export default function App() {
   }, [programs]);
 
   const handleSignIn = async () => {
+    if (signingIn) return;
     setAuthError(null);
+    setPopupBlocked(false);
+    setSigningIn(true);
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'No se pudo iniciar sesión.');
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code?: unknown }).code || '')
+          : '';
+      if (code === 'auth/popup-blocked') {
+        setPopupBlocked(true);
+        setAuthError(
+          'El navegador bloqueó la ventana emergente de Google. Permite las ventanas emergentes en la barra de direcciones o abre la app en una pestaña nueva para iniciar sesión.'
+        );
+      } else if (code === 'auth/popup-closed-by-user') {
+        setAuthError(
+          'Cerraste la ventana de Google antes de terminar el inicio de sesión. Haz clic en Iniciar Sesión para intentarlo de nuevo.'
+        );
+      } else if (code === 'auth/cancelled-popup-request') {
+        // Ignorar doble clic simultáneo mientras ya hay una ventana en curso
+      } else {
+        setAuthError(err instanceof Error ? err.message : 'No se pudo iniciar sesión.');
+      }
+    } finally {
+      setSigningIn(false);
     }
   };
 
   const handleSignOut = async () => {
     setAuthError(null);
+    setPopupBlocked(false);
     await signOut(auth);
-    if (activeSection === 'subir') {
+    if (activeSection === 'subir' || activeSection === 'publicidad') {
       setActiveSection('catalogo');
     }
   };
 
   const handleNavigate = (section: AppSection) => {
-    if (section === 'subir' && !isAdmin) {
+    if ((section === 'subir' || section === 'publicidad') && !isAdmin) {
       setActiveSection('catalogo');
       return;
     }
@@ -221,16 +264,21 @@ export default function App() {
     return programs;
   }, [showingStarterFallback, starterCatalogView, programs]);
 
+  const platformCounts = useMemo(() => {
+    const counts: Record<string, number> = { Todas: displayPrograms.length };
+    for (const plat of PROGRAM_PLATFORMS) counts[plat] = 0;
+    for (const p of displayPrograms) {
+      const effectivePlat = optimisticPlatforms[p.id] ?? p.platform;
+      counts[effectivePlat] = (counts[effectivePlat] ?? 0) + 1;
+    }
+    return counts;
+  }, [displayPrograms, optimisticPlatforms]);
+
   const filteredPrograms = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return displayPrograms.filter((p) => {
-      if (categoryFilter !== 'Todos') {
-        const matchesVentaAlias =
-          categoryFilter === 'Programas de Venta' &&
-          (p.category as string) === 'Punto de Venta';
-        if (p.category !== categoryFilter && !matchesVentaAlias) return false;
-      }
-      if (platformFilter !== 'Todas' && p.platform !== platformFilter) return false;
+      const effectivePlat = optimisticPlatforms[p.id] ?? p.platform;
+      if (platformFilter !== 'Todas' && effectivePlat !== platformFilter) return false;
       if (!q) return true;
       return (
         p.name.toLowerCase().includes(q) ||
@@ -238,7 +286,12 @@ export default function App() {
         p.summary.toLowerCase().includes(q)
       );
     });
-  }, [displayPrograms, searchQuery, categoryFilter, platformFilter]);
+  }, [displayPrograms, searchQuery, platformFilter, optimisticPlatforms]);
+
+  const activePromotions = useMemo(
+    () => promotions.filter((p) => p.status === 'Activo'),
+    [promotions]
+  );
 
   const selectedProgram = useMemo(
     () => displayPrograms.find((p) => p.id === selectedProgramId) ?? null,
@@ -296,12 +349,46 @@ export default function App() {
         imageUrl: mediaUrl,
         iconUrl: mediaUrl,
       });
+      setBrokenImageIds((prev) => {
+        const next = { ...prev };
+        delete next[prog.id];
+        return next;
+      });
     } catch (err) {
       setDataError(
         err instanceof Error ? err.message : 'No se pudo actualizar la imagen del cuadro.'
       );
     } finally {
       setUpdatingImageId(null);
+    }
+  };
+
+  const handleCardPlatformChange = async (
+    prog: ProgramRecord,
+    nextPlatform: ProgramPlatform
+  ) => {
+    const currentPlatform = optimisticPlatforms[prog.id] ?? prog.platform;
+    if (!isAdmin || showingStarterFallback || currentPlatform === nextPlatform) return;
+    setUpdatingPlatformId(prog.id);
+    setOptimisticPlatforms((prev) => ({ ...prev, [prog.id]: nextPlatform }));
+    setDataError(null);
+    try {
+      await updateProgramSettings(prog.id, { platform: nextPlatform });
+      setDownloadFeedback(`"${prog.name}" ubicado ahora en ${nextPlatform}.`);
+      setTimeout(() => {
+        setDownloadFeedback((prev) => (prev?.includes(prog.name) ? null : prev));
+      }, 3000);
+    } catch (err) {
+      setDataError(
+        err instanceof Error ? err.message : 'No se pudo cambiar la ubicación del programa.'
+      );
+    } finally {
+      setOptimisticPlatforms((prev) => {
+        const next = { ...prev };
+        delete next[prog.id];
+        return next;
+      });
+      setUpdatingPlatformId(null);
     }
   };
 
@@ -389,6 +476,7 @@ export default function App() {
         user={user}
         isAdmin={isAdmin}
         authLoading={authLoading}
+        signingIn={signingIn}
         onSignIn={handleSignIn}
         onSignOut={handleSignOut}
       />
@@ -397,16 +485,41 @@ export default function App() {
         {authError && (
           <div
             role="alert"
-            className="p-4 rounded-xl border border-red-300/40 bg-red-950/85 backdrop-blur-md text-red-100 text-sm flex items-center justify-between gap-4"
+            className="p-4 rounded-xl border border-red-300/40 bg-red-950/90 backdrop-blur-md text-red-100 text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3"
           >
             <span>{authError}</span>
-            <button
-              type="button"
-              onClick={() => setAuthError(null)}
-              className="text-xs font-semibold underline cursor-pointer"
-            >
-              Cerrar
-            </button>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {popupBlocked && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleSignIn}
+                    disabled={signingIn}
+                    className="px-3 py-1.5 text-xs font-bold text-[#041E00] bg-[#7FE000] hover:bg-[#91F20F] rounded-lg cursor-pointer transition-colors"
+                  >
+                    Reintentar Google
+                  </button>
+                  <a
+                    href={typeof window !== 'undefined' ? window.location.href : '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 text-xs font-semibold text-white bg-[#0052CC] hover:bg-[#0066FF] rounded-lg transition-colors"
+                  >
+                    Abrir en pestaña nueva
+                  </a>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError(null);
+                  setPopupBlocked(false);
+                }}
+                className="text-xs font-semibold underline cursor-pointer px-1"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         )}
 
@@ -460,57 +573,175 @@ export default function App() {
           />
         ) : activeSection === 'catalogo' ? (
           <>
-            {/* Top 4 Category Shortcut Boxes (Translucent Navy Glass + Cyan-to-Lime Gradient Border) */}
-            <section aria-label="Categorías destacadas" className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {FEATURED_CATEGORIES.map((cat) => {
-                const IconComp = cat.icon;
-                const isSelected = categoryFilter === cat.id;
-                return (
+            {/* Brand Logo Showcase & Active Advertisements */}
+            <section aria-label="Marca principal y publicidad" className="space-y-5">
+              <div className="rounded-2xl bg-[#041B47]/72 backdrop-blur-md border border-[#00A3FF]/30 px-5 py-4 sm:px-7 sm:py-5 shadow-[0_12px_32px_rgba(0,12,42,0.42)] flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 text-center sm:text-left min-w-0">
+                  <img
+                    src={LOGO_URL}
+                    alt="Loteros descargas"
+                    referrerPolicy="no-referrer"
+                    className="h-16 sm:h-20 w-auto max-w-[280px] sm:max-w-[340px] object-contain drop-shadow-[0_6px_22px_rgba(0,163,255,0.45)] shrink-0"
+                  />
+                  <div className="space-y-1 min-w-0">
+                    <p className="text-sm sm:text-base font-semibold text-white">
+                      Centro Oficial de Descargas para Loterías
+                    </p>
+                    <p className="text-xs sm:text-sm text-blue-100/80 max-w-xl">
+                      Instaladores directos para Windows, Android, Utilidades e Impresión Térmica.
+                    </p>
+                  </div>
+                </div>
+
+                {isAdmin && (
                   <button
-                    key={cat.id}
                     type="button"
-                    onClick={() =>
-                      setCategoryFilter((prev) =>
-                        cat.id === 'Todos' ? 'Todos' : prev === cat.id ? 'Todos' : cat.id
-                      )
-                    }
-                    className="group p-[1.5px] rounded-xl bg-gradient-to-r from-[#00A3FF] via-[#2ED8FF] to-[#7FE000] text-left transition-all hover:-translate-y-0.5 cursor-pointer shadow-[0_8px_24px_rgba(0,14,48,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7FE000]"
+                    onClick={() => handleNavigate('publicidad')}
+                    className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-bold text-[#041E00] bg-[#7FE000] hover:bg-[#91F20F] rounded-lg cursor-pointer transition-colors shadow-[0_4px_14px_rgba(127,224,0,0.28)] shrink-0"
                   >
-                    <div
-                      className={`h-full rounded-[10.5px] px-4 py-3.5 flex items-center gap-3.5 backdrop-blur-md transition-colors ${
-                        isSelected
-                          ? 'bg-[#09327A]/92'
-                          : 'bg-[#041B47]/85 group-hover:bg-[#072863]/90'
-                      }`}
-                    >
-                      <span className="w-9 h-9 rounded-lg bg-[#00A3FF]/15 border border-[#00A3FF]/40 flex items-center justify-center shrink-0">
-                        <IconComp className="w-5 h-5 text-[#7FE000]" />
-                      </span>
-                      <span className="text-sm font-semibold text-white leading-tight">
-                        {cat.label}
-                      </span>
-                    </div>
+                    <Megaphone className="w-3.5 h-3.5" />
+                    Crear Publicidad
                   </button>
-                );
-              })}
+                )}
+              </div>
+
+              {/* Active Page Advertisements / Banners */}
+              {activePromotions.length > 0 && (
+                <div className="space-y-3">
+                  {activePromotions
+                    .filter((ad) => ad.placement === 'banner')
+                    .map((ad) => {
+                      const hasBannerText =
+                        (ad.title && ad.title !== 'Publicidad') || Boolean(ad.subtitle);
+                      const content = (
+                        <div className="relative rounded-2xl overflow-hidden bg-[#041B47]/88 backdrop-blur-md border border-[#00A3FF]/40 hover:border-[#7FE000] transition-all shadow-[0_10px_28px_rgba(0,10,36,0.45)] flex flex-col">
+                          {ad.imageUrl && (
+                            <div className="w-full overflow-hidden bg-[#021230]">
+                              <img
+                                src={ad.imageUrl}
+                                alt={ad.title || 'Publicidad'}
+                                referrerPolicy="no-referrer"
+                                className="w-full max-h-60 object-contain mx-auto block"
+                              />
+                            </div>
+                          )}
+                          {(hasBannerText || !ad.imageUrl || ad.linkUrl) && (
+                            <div className="px-4 py-3 sm:px-5 sm:py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-t border-white/10">
+                              <div className="space-y-0.5 min-w-0">
+                                {ad.badgeText && (
+                                  <span className="inline-block text-[10px] font-bold uppercase tracking-wider text-[#7FE000]">
+                                    {ad.badgeText}
+                                  </span>
+                                )}
+                                {hasBannerText && (
+                                  <h3 className="font-display text-sm sm:text-base font-bold text-white leading-snug">
+                                    {ad.title}
+                                  </h3>
+                                )}
+                                {ad.subtitle && (
+                                  <p className="text-xs text-blue-100/85 line-clamp-2">
+                                    {ad.subtitle}
+                                  </p>
+                                )}
+                              </div>
+                              {ad.linkUrl && (
+                                <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0052CC] text-white text-xs font-semibold shrink-0 self-start sm:self-center">
+                                  Ver más
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+
+                      return ad.linkUrl ? (
+                        <a
+                          key={ad.id}
+                          href={ad.linkUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block"
+                        >
+                          {content}
+                        </a>
+                      ) : (
+                        <div key={ad.id}>{content}</div>
+                      );
+                    })}
+
+                  {activePromotions.some((ad) => ad.placement === 'tarjeta') && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {activePromotions
+                        .filter((ad) => ad.placement === 'tarjeta')
+                        .map((ad) => {
+                          const cardInner = (
+                            <div className="h-full rounded-2xl overflow-hidden bg-[#041B47]/88 backdrop-blur-md border border-[#00A3FF]/40 hover:border-[#7FE000] transition-all shadow-lg flex flex-col">
+                              {ad.imageUrl && (
+                                <div className="h-36 w-full overflow-hidden bg-[#021230]">
+                                  <img
+                                    src={ad.imageUrl}
+                                    alt={ad.title}
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                              )}
+                              <div className="p-4 flex-1 flex flex-col justify-between gap-2">
+                                <div className="space-y-1">
+                                  {ad.badgeText && (
+                                    <span className="inline-block text-[10px] font-bold uppercase tracking-wider text-[#7FE000]">
+                                      {ad.badgeText}
+                                    </span>
+                                  )}
+                                  <h3 className="font-display text-sm font-bold text-white leading-snug">
+                                    {ad.title}
+                                  </h3>
+                                  {ad.subtitle && (
+                                    <p className="text-xs text-blue-100/80 line-clamp-2">
+                                      {ad.subtitle}
+                                    </p>
+                                  )}
+                                </div>
+                                {ad.linkUrl && (
+                                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#7AD7FF]">
+                                    Abrir enlace
+                                    <ExternalLink className="w-3 h-3" />
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+
+                          return ad.linkUrl ? (
+                            <a
+                              key={ad.id}
+                              href={ad.linkUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block h-full"
+                            >
+                              {cardInner}
+                            </a>
+                          ) : (
+                            <div key={ad.id} className="h-full">
+                              {cardInner}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
 
-            {/* Catalog Section Header + Platform Underline Tabs (Windows / Android only) */}
+            {/* Catalog Section Header + Platform Underline Tabs (Windows / Android / Utilidades / Impresión) */}
             <section className="space-y-4">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex flex-wrap items-baseline gap-3">
                   <h1 className="font-display text-xl sm:text-2xl font-bold text-white tracking-tight drop-shadow-sm">
                     Lo último en programas de venta de lotería
                   </h1>
-                  {categoryFilter !== 'Todos' && (
-                    <button
-                      type="button"
-                      onClick={() => setCategoryFilter('Todos')}
-                      className="text-xs font-semibold text-[#8CFF1A] hover:underline cursor-pointer"
-                    >
-                      {categoryFilter} (Ver todos)
-                    </button>
-                  )}
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -539,22 +770,29 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Clean Platform Underline Tabs (Todos | Windows | Android) */}
-              <div className="border-b border-white/15 flex items-center gap-6 overflow-x-auto">
+              {/* Clean Platform Filter Tabs (Todos | Windows | Android | Utilidades | Impresión) */}
+              <div className="border-b border-white/15 flex items-center gap-5 overflow-x-auto">
+                <span className="pb-3 text-xs font-semibold uppercase tracking-wider text-blue-200/65 whitespace-nowrap shrink-0">
+                  Ver:
+                </span>
                 {['Todas', ...PROGRAM_PLATFORMS].map((plat) => {
                   const active = platformFilter === plat;
+                  const count = platformCounts[plat] ?? 0;
                   return (
                     <button
                       key={plat}
                       type="button"
                       onClick={() => setPlatformFilter(plat)}
-                      className={`pb-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      className={`pb-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1.5 ${
                         active
                           ? 'border-[#7FE000] text-white font-semibold'
                           : 'border-transparent text-blue-100/75 hover:text-white'
                       }`}
                     >
-                      {plat === 'Todas' ? 'Todos' : plat}
+                      <span>{plat === 'Todas' ? 'Todos' : plat}</span>
+                      <span className="text-[11px] font-mono text-[#7AD7FF]/85 tabular-nums">
+                        ({count})
+                      </span>
                     </button>
                   );
                 })}
@@ -565,7 +803,7 @@ export default function App() {
             {showingStarterFallback && isAdmin && (
               <div className="p-4 rounded-xl bg-[#041B47]/85 backdrop-blur-md border border-[#00A3FF]/35 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-lg">
                 <p className="text-sm text-blue-50">
-                  Mostrando los 6 programas base para Windows y Android. Sube tus propios programas con &quot;Subir Programa&quot;, impórtalos para editarlos u ocúltalos de la vista.
+                  Mostrando los 6 programas base para Windows, Android, Utilidades e Impresión. Sube tus propios programas con &quot;Subir Programa&quot;, impórtalos para editarlos u ocúltalos de la vista.
                 </p>
                 <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                   <button
@@ -633,12 +871,11 @@ export default function App() {
                       Mostrar Ejemplos Base
                     </button>
                   )}
-                  {(searchQuery || categoryFilter !== 'Todos' || platformFilter !== 'Todas') && (
+                  {(searchQuery || platformFilter !== 'Todas') && (
                     <button
                       type="button"
                       onClick={() => {
                         setSearchQuery('');
-                        setCategoryFilter('Todos');
                         setPlatformFilter('Todas');
                       }}
                       className="px-4 py-2 text-xs font-medium text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg cursor-pointer"
@@ -655,7 +892,10 @@ export default function App() {
               >
                 {filteredPrograms.map((prog) => {
                   const defaults = getDefaultMediaForProgram(prog.slug || prog.category);
-                  const tileSrc = prog.imageUrl || prog.iconUrl || defaults.imageUrl;
+                  const isBroken = Boolean(brokenImageIds[prog.id]);
+                  const tileSrc = isBroken
+                    ? defaults.imageUrl
+                    : prog.imageUrl || prog.iconUrl || defaults.imageUrl;
 
                   return (
                     <article key={prog.id} className="flex flex-col">
@@ -665,25 +905,60 @@ export default function App() {
                         onClick={() => handleDirectDownload(prog)}
                         aria-label={`Descargar ${prog.name}`}
                         title={`Clic para descargar ${prog.name}`}
-                        className="group relative aspect-square w-full bg-white/95 border border-[#00A3FF]/35 rounded-2xl p-3 shadow-[0_10px_28px_rgba(0,10,36,0.45)] hover:border-[#7FE000] hover:shadow-[0_14px_32px_rgba(0,163,255,0.35)] transition-all flex items-center justify-center overflow-hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7FE000]"
+                        className="group relative aspect-square w-full bg-[#031B49]/70 border border-[#00A3FF]/40 rounded-2xl shadow-[0_10px_28px_rgba(0,10,36,0.45)] hover:border-[#7FE000] hover:shadow-[0_14px_32px_rgba(0,163,255,0.35)] transition-all flex items-center justify-center overflow-hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7FE000]"
                       >
                         <img
                           src={tileSrc}
                           alt={`Descargar ${prog.name}`}
                           referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover rounded-xl shadow-sm group-hover:scale-[1.04] transition-transform duration-200"
+                          onError={() => {
+                            if (!isBroken) {
+                              setBrokenImageIds((prev) => ({ ...prev, [prog.id]: true }));
+                            }
+                          }}
+                          className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-200"
                         />
-                        <span className="absolute inset-x-3 bottom-3 py-1.5 px-2.5 rounded-lg bg-[#031B49]/95 border border-[#00A3FF]/40 text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity shadow-md">
+                        {isBroken && isAdmin && (
+                          <span className="absolute top-2 inset-x-2 py-0.5 px-2 rounded bg-amber-950/90 border border-amber-400/50 text-amber-200 text-[10px] font-semibold text-center">
+                            Resubir imagen
+                          </span>
+                        )}
+                        <span className="absolute inset-x-2.5 bottom-2.5 py-1.5 px-2.5 rounded-lg bg-[#031B49]/95 border border-[#00A3FF]/40 text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity shadow-md">
                           <Download className="w-3.5 h-3.5 text-[#7FE000]" />
                           Descargar
                         </span>
                       </button>
 
-                      {/* Clean unboxed metadata row below square frame */}
+                      {/* Clean metadata row below square frame */}
                       <div className="mt-2.5 flex items-center justify-between gap-2 text-xs">
-                        <span className="font-mono text-[#7AD7FF] font-semibold tabular-nums truncate">
-                          {prog.platform}
-                        </span>
+                        {isAdmin && !showingStarterFallback ? (
+                          <div
+                            className="flex items-center gap-1 min-w-0"
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
+                            <select
+                              aria-label={`Ubicación individual de ${prog.name}`}
+                              title={`Ubicación individual de ${prog.name}`}
+                              value={optimisticPlatforms[prog.id] ?? prog.platform}
+                              disabled={updatingPlatformId === prog.id}
+                              onChange={(e) =>
+                                handleCardPlatformChange(prog, e.target.value as ProgramPlatform)
+                              }
+                              className="font-mono text-xs text-[#7AD7FF] font-semibold bg-[#031B49]/90 border border-[#00A3FF]/40 rounded-md px-1.5 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#7FE000] hover:border-[#7FE000] max-w-full"
+                            >
+                              {PROGRAM_PLATFORMS.map((plat) => (
+                                <option key={plat} value={plat} className="bg-[#031B49] text-white">
+                                  {plat}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <span className="font-mono text-[#7AD7FF] font-semibold tabular-nums truncate">
+                            {prog.platform}
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={() => setSelectedProgramId(prog.id)}
@@ -754,6 +1029,23 @@ export default function App() {
               </section>
             )}
           </>
+        ) : activeSection === 'publicidad' ? (
+          isAdmin ? (
+            <div className="max-w-4xl mx-auto">
+              <PromotionsManager
+                promotions={promotions}
+                onDone={() => handleNavigate('catalogo')}
+              />
+            </div>
+          ) : (
+            <section className="bg-white/95 backdrop-blur-md text-[#0B1E3D] border border-[#00A3FF]/35 rounded-2xl p-8 max-w-2xl mx-auto text-center space-y-4">
+              <Lock className="w-8 h-8 text-[#0052CC]/60 mx-auto" />
+              <p className="text-sm font-semibold text-[#0B1E3D]">Acceso Exclusivo del Propietario</p>
+              <p className="text-sm text-slate-600">
+                Solo la cuenta propietaria puede crear o administrar la publicidad de la página.
+              </p>
+            </section>
+          )
         ) : (
           <section className="bg-white/95 backdrop-blur-md text-[#0B1E3D] border border-[#00A3FF]/35 rounded-2xl p-6 sm:p-8 max-w-4xl mx-auto shadow-[0_16px_42px_rgba(0,12,42,0.45)]">
             <div className="pb-6 mb-6 border-b border-blue-100 flex items-start justify-between gap-4">
@@ -823,13 +1115,22 @@ export default function App() {
               Catálogo
             </button>
             {isAdmin && (
-              <button
-                type="button"
-                onClick={() => handleNavigate('subir')}
-                className="font-medium hover:text-[#7FE000] cursor-pointer"
-              >
-                Subir Programa
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleNavigate('subir')}
+                  className="font-medium hover:text-[#7FE000] cursor-pointer"
+                >
+                  Subir Programa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleNavigate('publicidad')}
+                  className="font-medium hover:text-[#7FE000] cursor-pointer"
+                >
+                  Publicidad
+                </button>
+              </>
             )}
           </div>
         </div>

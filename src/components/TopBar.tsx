@@ -1,7 +1,7 @@
 import React from 'react';
 import type { User } from 'firebase/auth';
 
-export type AppSection = 'catalogo' | 'subir';
+export type AppSection = 'catalogo' | 'subir' | 'publicidad';
 
 const LOGO_URL = '/assets/aistudio/Loteros_Descargas__Logo_Tecnol_gico_06091cd3.png';
 
@@ -11,6 +11,7 @@ interface TopBarProps {
   user: User | null;
   isAdmin: boolean;
   authLoading: boolean;
+  signingIn?: boolean;
   onSignIn: () => void;
   onSignOut: () => void;
 }
@@ -21,12 +22,18 @@ export const TopBar: React.FC<TopBarProps> = ({
   user,
   isAdmin,
   authLoading,
+  signingIn = false,
   onSignIn,
   onSignOut,
 }) => {
   const navItems: Array<{ id: AppSection; label: string }> = [
     { id: 'catalogo', label: 'Catálogo' },
-    ...(isAdmin ? [{ id: 'subir' as const, label: 'Subir Programa' }] : []),
+    ...(isAdmin
+      ? [
+          { id: 'subir' as const, label: 'Subir Programa' },
+          { id: 'publicidad' as const, label: 'Publicidad' },
+        ]
+      : []),
   ];
 
   return (
@@ -38,13 +45,13 @@ export const TopBar: React.FC<TopBarProps> = ({
           type="button"
           onClick={() => onNavigate('catalogo')}
           aria-label="Ir al catálogo de LOTEROSDESCARGAS"
-          className="flex items-center shrink-0 cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7FE000]"
+          className="flex items-center py-1 shrink-0 cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7FE000]"
         >
           <img
             src={LOGO_URL}
             alt="Loteros descargas"
             referrerPolicy="no-referrer"
-            className="h-10 sm:h-11 w-auto object-contain drop-shadow-[0_2px_10px_rgba(0,163,255,0.35)]"
+            className="h-11 sm:h-12 w-auto max-w-[200px] sm:max-w-[230px] object-contain drop-shadow-[0_2px_12px_rgba(0,163,255,0.4)]"
           />
         </button>
 
@@ -95,9 +102,10 @@ export const TopBar: React.FC<TopBarProps> = ({
             <button
               type="button"
               onClick={onSignIn}
-              className="px-4 py-2 text-sm font-bold text-[#041E00] bg-[#7FE000] hover:bg-[#91F20F] rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-[0_4px_16px_rgba(127,224,0,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              disabled={signingIn}
+              className="px-4 py-2 text-sm font-bold text-[#041E00] bg-[#7FE000] hover:bg-[#91F20F] disabled:opacity-70 disabled:cursor-wait rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-[0_4px_16px_rgba(127,224,0,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             >
-              Iniciar Sesión
+              {signingIn ? 'Abriendo Google...' : 'Iniciar Sesión'}
             </button>
           )}
         </div>

@@ -2,13 +2,13 @@ import type { Timestamp } from 'firebase/firestore';
 
 export const PROGRAM_CATEGORIES = [
   'Programas de Venta',
-  'Impresión Térmica',
-  'Utilidades y Drivers',
 ] as const;
 
 export const PROGRAM_PLATFORMS = [
   'Windows',
   'Android',
+  'Utilidades',
+  'Impresión',
 ] as const;
 
 export const RELEASE_CHANNELS = ['Estable', 'Beta', 'Parche Crítico'] as const;
@@ -25,6 +25,14 @@ export type ProgramPlatform = (typeof PROGRAM_PLATFORMS)[number];
 export type ReleaseChannel = (typeof RELEASE_CHANNELS)[number];
 export type CommentCategory = (typeof COMMENT_CATEGORIES)[number];
 export type ProgramStatus = 'Activo' | 'Archivado';
+export type PromotionPlacement = 'banner' | 'tarjeta';
+export type PromotionStatus = 'Activo' | 'Pausado';
+
+export const DEFAULT_FEATURED_LINK = {
+  label: 'PizarraAnimal Digital',
+  url: 'https://pizarraanimalspot.ai.studio',
+  imageUrl: '',
+} as const;
 
 // Synchronized verbatim with firebase-blueprint.json
 export const SCHEMA_LIMITS = {
@@ -37,7 +45,7 @@ export const SCHEMA_LIMITS = {
   SUMMARY_MAX: 240,
   DESCRIPTION_MIN: 10,
   DESCRIPTION_MAX: 4000,
-  MEDIA_URL_MAX: 500,
+  MEDIA_URL_MAX: 350000,
   VERSION_MAX: 32,
   FILENAME_MAX: 180,
   URL_MAX: 500,
@@ -48,6 +56,10 @@ export const SCHEMA_LIMITS = {
   COMMENT_BODY_MIN: 3,
   COMMENT_BODY_MAX: 1200,
   ADMIN_REPLY_MAX: 1000,
+  SITE_LINK_LABEL_MAX: 80,
+  PROMO_TITLE_MAX: 100,
+  PROMO_SUBTITLE_MAX: 240,
+  PROMO_BADGE_MAX: 40,
 } as const;
 
 export const SCHEMA_PATTERNS = {
@@ -165,4 +177,28 @@ export interface AutoUpdateCheckResponse {
     changelog: string;
     releasedAt: string;
   } | null;
+}
+
+export interface SiteSettingsRecord {
+  id: string;
+  featuredLinkLabel: string;
+  featuredLinkUrl: string;
+  featuredLinkImageUrl?: string;
+  updatedBy: string;
+  createdAt?: Timestamp | null;
+  updatedAt?: Timestamp | null;
+}
+
+export interface PromotionRecord {
+  id: string;
+  title: string;
+  subtitle: string;
+  badgeText: string;
+  imageUrl: string;
+  linkUrl: string;
+  placement: PromotionPlacement;
+  status: PromotionStatus;
+  ownerId: string;
+  createdAt?: Timestamp | null;
+  updatedAt?: Timestamp | null;
 }

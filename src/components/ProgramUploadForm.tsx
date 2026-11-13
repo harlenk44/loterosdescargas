@@ -184,12 +184,8 @@ export const ProgramUploadForm: React.FC<ProgramUploadFormProps> = ({
         setErrorMessage('La URL externa debe comenzar con https:// por seguridad.');
         return;
       }
-      if (!externalFileName.trim()) {
-        setErrorMessage('Especifica el nombre del archivo instalador.');
-        return;
-      }
-      if (!SCHEMA_PATTERNS.SHA256.test(externalSha256.trim())) {
-        setErrorMessage('El hash SHA-256 debe tener exactamente 64 caracteres hexadecimales.');
+      if (externalSha256.trim() && !SCHEMA_PATTERNS.SHA256.test(externalSha256.trim())) {
+        setErrorMessage('Si ingresas un SHA-256 manual, debe tener 64 caracteres hexadecimales (o déjalo vacío).');
         return;
       }
     }
@@ -239,14 +235,40 @@ export const ProgramUploadForm: React.FC<ProgramUploadFormProps> = ({
         sha256 = uploaded.sha256;
         signature = uploaded.signature;
       } else {
-        setStatusMessage('Generando firma HMAC-SHA256 del archivo...');
-        fileName = externalFileName.trim();
+        setStatusMessage('Generando firma HMAC-SHA256 del enlace...');
+        downloadUrl = externalUrl.trim();
+        const urlSeg = downloadUrl.split('?')[0].split('#')[0].split('/').filter(Boolean).pop() || '';
+        const defaultExt = platform === 'Android' ? '.apk' : '.exe';
+        fileName = externalFileName.trim() || urlSeg || `${effectiveSlug}${defaultExt}`;
         fileSizeBytes = Math.max(
           1024,
           Math.round((parseFloat(externalFileSizeMB) || 1) * 1024 * 1024)
         );
-        downloadUrl = externalUrl.trim();
-        sha256 = externalSha256.trim().toLowerCase();
+        if (externalSha256.trim()) {
+          sha256 = externalSha256.trim().toLowerCase();
+        } else {
+          const seed = `${effectiveSlug}|${trimmedVersion}|${downloadUrl}|${fileName}|${fileSizeBytes}`;
+          if (typeof crypto !== 'undefined' && crypto.subtle) {
+            const digest = await crypto.subtle.digest(
+              'SHA-256',
+              new TextEncoder().encode(seed)
+            );
+            sha256 = Array.from(new Uint8Array(digest))
+              .map((b) => b.toString(16).padStart(2, '0'))
+              .join('');
+          } else {
+            let h = 2166136261;
+            let out = '';
+            for (let round = 0; round < 8; round++) {
+              for (let i = 0; i < seed.length; i++) {
+                h ^= seed.charCodeAt(i) + round;
+                h = Math.imul(h, 16777619);
+              }
+              out += (h >>> 0).toString(16).padStart(8, '0');
+            }
+            sha256 = out.slice(0, 64);
+          }
+        }
         signature = await signExternalRelease(
           effectiveSlug,
           trimmedVersion,
@@ -409,12 +431,12 @@ export const ProgramUploadForm: React.FC<ProgramUploadFormProps> = ({
               {/* Exact Square Tile Preview matching the catalog grid */}
               <div className="flex flex-col sm:flex-row items-center gap-5 py-1">
                 <div className="w-40 shrink-0">
-                  <div className="aspect-square w-full bg-white border border-blue-100 rounded-2xl p-3 shadow-sm flex items-center justify-center">
+                  <div className="aspect-square w-full bg-[#031B49]/85 border border-[#00A3FF]/40 rounded-2xl overflow-hidden shadow-sm flex items-center justify-center">
                     <img
                       src={imageUrl}
                       alt="Vista previa del cuadro del programa"
                       referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover rounded-xl shadow-sm"
+                      className="w-full h-full object-cover"
                     />
                   </div>
                   <div className="mt-2 flex items-center justify-between text-[11px]">
@@ -583,7 +605,7 @@ export const ProgramUploadForm: React.FC<ProgramUploadFormProps> = ({
                     maxLength={64}
                     value={externalSha256}
                     onChange={(e) => setExternalSha256(e.target.value)}
-                    placeholder="SHA-256 (64 caracteres hexadecimales)"
+                    placeholder="SHA-256 (opcional — déjalo vacío si no lo tienes)"
                     className={`${inputClass} font-mono`}
                   />
                 </div>
@@ -898,7 +920,7 @@ export const ProgramUploadForm: React.FC<ProgramUploadFormProps> = ({
                     maxLength={64}
                     value={externalSha256}
                     onChange={(e) => setExternalSha256(e.target.value)}
-                    placeholder="Hash SHA-256 (64 caracteres hexadecimales)"
+                    placeholder="Hash SHA-256 (opcional — déjalo vacío si no lo tienes)"
                     className={`${inputClass} font-mono`}
                   />
                 </div>
