@@ -149,7 +149,7 @@ service cloud.firestore {
         ]) &&
         data.keys().hasOnly([
           'id', 'title', 'subtitle', 'badgeText', 'imageUrl', 'linkUrl',
-          'placement', 'status', 'ownerId', 'createdAt', 'updatedAt'
+          'placement', 'position', 'displayStyle', 'status', 'ownerId', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
         data.title is string && data.title.size() >= 2 && data.title.size() <= 100 &&
@@ -157,7 +157,9 @@ service cloud.firestore {
         data.badgeText is string && data.badgeText.size() <= 40 &&
         data.imageUrl is string && data.imageUrl.size() <= 350000 &&
         data.linkUrl is string && data.linkUrl.size() <= 500 &&
-        data.placement in ['banner', 'tarjeta'] &&
+        data.placement in ['banner', 'tarjeta', 'skyscraper', 'rectangulo', 'vertical'] &&
+        (!('position' in data) || data.position in ['arriba', 'bajo_logo', 'sobre_programas', 'abajo', 'flotante_derecha', 'flotante_izquierda', 'lateral_izquierdo', 'lateral_derecho']) &&
+        (!('displayStyle' in data) || data.displayStyle in ['fija', 'flotante']) &&
         data.status in ['Activo', 'Pausado'] &&
         isValidId(data.ownerId) &&
         data.createdAt is timestamp &&
@@ -355,7 +357,7 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly([
           'title', 'subtitle', 'badgeText', 'imageUrl', 'linkUrl',
-          'placement', 'status', 'updatedAt'
+          'placement', 'position', 'displayStyle', 'status', 'updatedAt'
         ]);
 
       allow delete: if isAdmin() && isValidId(promoId);

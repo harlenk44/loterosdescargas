@@ -27,7 +27,9 @@ import {
   type ProgramRecord,
   type ProgramStatus,
   type ProgramVersionRecord,
+  type PromotionDisplayStyle,
   type PromotionPlacement,
+  type PromotionPosition,
   type PromotionRecord,
   type PromotionStatus,
   type ReleaseChannel,
@@ -191,7 +193,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 
 async function encodeImageToPersistentDataUrl(
   file: File,
-  kind: 'icon' | 'cover' | 'banner'
+  kind: 'icon' | 'cover' | 'banner' | 'skyscraper' | 'rectangulo' | 'vertical'
 ): Promise<string | null> {
   if (file.type === 'image/svg+xml' || file.type === 'image/gif' || file.type === 'image/x-icon') {
     const direct = await blobToDataUrl(file);
@@ -203,8 +205,26 @@ async function encodeImageToPersistentDataUrl(
     const objectUrl = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(objectUrl);
-      const maxWidth = kind === 'banner' ? 1280 : 600;
-      const maxHeight = kind === 'banner' ? 640 : 600;
+      const maxWidth =
+        kind === 'banner'
+          ? 1280
+          : kind === 'skyscraper'
+            ? 320
+            : kind === 'rectangulo'
+              ? 960
+              : kind === 'vertical'
+                ? 720
+                : 600;
+      const maxHeight =
+        kind === 'banner'
+          ? 640
+          : kind === 'skyscraper'
+            ? 1200
+            : kind === 'rectangulo'
+              ? 720
+              : kind === 'vertical'
+                ? 1440
+                : 600;
       let scale = Math.min(1, maxWidth / img.width, maxHeight / img.height);
       const qualities = [0.88, 0.78, 0.66, 0.54, 0.42];
 
@@ -297,7 +317,7 @@ async function prepareImageForUpload(file: File): Promise<File> {
 
 export async function uploadMediaImage(
   file: File,
-  kind: 'icon' | 'cover' | 'banner'
+  kind: 'icon' | 'cover' | 'banner' | 'skyscraper' | 'rectangulo' | 'vertical'
 ): Promise<string> {
   const user = auth.currentUser;
   if (!user) throw new Error('Debes iniciar sesión como administrador para subir imágenes.');
@@ -1047,7 +1067,11 @@ export function subscribePromotions(
   const emitMerged = () => {
     const byId = new Map<string, PromotionRecord>();
     for (const item of [...activeItems, ...pausedItems]) {
-      byId.set(item.id, item);
+      byId.set(item.id, {
+        ...item,
+        position: item.position ?? 'bajo_logo',
+        displayStyle: item.displayStyle ?? 'fija',
+      });
     }
     const merged = Array.from(byId.values());
     merged.sort((a, b) => {
@@ -1107,6 +1131,8 @@ export async function createPromotion(input: {
   imageUrl: string;
   linkUrl: string;
   placement: PromotionPlacement;
+  position?: PromotionPosition;
+  displayStyle?: PromotionDisplayStyle;
   status: PromotionStatus;
 }): Promise<string> {
   const user = auth.currentUser;
@@ -1129,6 +1155,8 @@ export async function createPromotion(input: {
       imageUrl: input.imageUrl.trim().slice(0, SCHEMA_LIMITS.MEDIA_URL_MAX),
       linkUrl: cleanLink,
       placement: input.placement,
+      position: input.position ?? 'bajo_logo',
+      displayStyle: input.displayStyle ?? 'fija',
       status: input.status,
       ownerId: user.uid,
       createdAt: serverTimestamp(),
@@ -1149,6 +1177,8 @@ export async function updatePromotion(
     imageUrl: string;
     linkUrl: string;
     placement: PromotionPlacement;
+    position: PromotionPosition;
+    displayStyle: PromotionDisplayStyle;
     status: PromotionStatus;
   }>
 ): Promise<void> {
@@ -1174,6 +1204,12 @@ export async function updatePromotion(
   }
   if (patch.placement !== undefined) {
     payload.placement = patch.placement;
+  }
+  if (patch.position !== undefined) {
+    payload.position = patch.position;
+  }
+  if (patch.displayStyle !== undefined) {
+    payload.displayStyle = patch.displayStyle;
   }
   if (patch.status !== undefined) {
     payload.status = patch.status;

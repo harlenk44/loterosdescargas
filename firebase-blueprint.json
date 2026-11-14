@@ -479,8 +479,27 @@
         },
         "placement": {
           "type": "string",
-          "enum": ["banner", "tarjeta"],
+          "enum": ["banner", "tarjeta", "skyscraper", "rectangulo", "vertical"],
           "description": "Visual layout format of the promotion."
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "arriba",
+            "bajo_logo",
+            "sobre_programas",
+            "abajo",
+            "flotante_derecha",
+            "flotante_izquierda",
+            "lateral_izquierdo",
+            "lateral_derecho"
+          ],
+          "description": "Page placement zone for the promotion."
+        },
+        "displayStyle": {
+          "type": "string",
+          "enum": ["fija", "flotante"],
+          "description": "Whether the promotion stays inline in page flow (fija) or floats over the viewport (flotante)."
         },
         "status": {
           "type": "string",

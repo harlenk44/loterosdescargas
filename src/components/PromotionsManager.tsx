@@ -17,11 +17,39 @@ import {
   uploadMediaImage,
 } from '../lib/repositoryApi';
 import {
+  PROMOTION_DISPLAY_STYLES,
+  PROMOTION_POSITIONS,
   SCHEMA_LIMITS,
+  type PromotionDisplayStyle,
   type PromotionPlacement,
+  type PromotionPosition,
   type PromotionRecord,
   type PromotionStatus,
 } from '../types/repository';
+
+const POSITION_LABELS: Record<PromotionPosition, string> = {
+  arriba: 'Arriba (encima del logo)',
+  bajo_logo: 'Debajo del logo (principal)',
+  sobre_programas: 'Encima de los programas',
+  abajo: 'Abajo (debajo de los programas)',
+  flotante_derecha: 'Esquina inferior derecha',
+  flotante_izquierda: 'Esquina inferior izquierda',
+  lateral_izquierdo: 'Lado izquierdo (Skyscraper flotante 160×600)',
+  lateral_derecho: 'Lado derecho (Skyscraper flotante 160×600)',
+};
+
+const PLACEMENT_LABELS: Record<PromotionPlacement, string> = {
+  banner: 'Banner ancho',
+  tarjeta: 'Tarjeta',
+  skyscraper: 'Banner Skyscraper (160×600 px)',
+  vertical: 'Banner Skyscraper (160×600 px)',
+  rectangulo: 'Banner Skyscraper (160×600 px)',
+};
+
+const DISPLAY_STYLE_LABELS: Record<PromotionDisplayStyle, string> = {
+  fija: 'Fija (en la página)',
+  flotante: 'Flotante (siempre visible)',
+};
 
 interface PromotionsManagerProps {
   promotions: PromotionRecord[];
@@ -38,6 +66,8 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
   const [badgeText, setBadgeText] = useState('Publicidad');
   const [linkUrl, setLinkUrl] = useState('');
   const [placement, setPlacement] = useState<PromotionPlacement>('banner');
+  const [displayStyle, setDisplayStyle] = useState<PromotionDisplayStyle>('fija');
+  const [position, setPosition] = useState<PromotionPosition>('bajo_logo');
   const [status, setStatus] = useState<PromotionStatus>('Activo');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState('');
@@ -56,10 +86,55 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
     setBadgeText('Publicidad');
     setLinkUrl('');
     setPlacement('banner');
+    setDisplayStyle('fija');
+    setPosition('bajo_logo');
     setStatus('Activo');
     setImageFile(null);
     setImagePreview('');
     setErrorMessage(null);
+  };
+
+  const handlePlacementChange = (nextPlacement: PromotionPlacement) => {
+    setPlacement(nextPlacement);
+    if (!editingId && nextPlacement === 'skyscraper') {
+      setDisplayStyle('flotante');
+      if (
+        position === 'bajo_logo' ||
+        position === 'arriba' ||
+        position === 'sobre_programas' ||
+        position === 'abajo'
+      ) {
+        setPosition('lateral_derecho');
+      }
+    }
+  };
+
+  const handlePositionChange = (nextPosition: PromotionPosition) => {
+    setPosition(nextPosition);
+    if (
+      !editingId &&
+      (nextPosition === 'lateral_izquierdo' || nextPosition === 'lateral_derecho')
+    ) {
+      setDisplayStyle('flotante');
+      setPlacement('skyscraper');
+    }
+  };
+
+  const handleDisplayStyleChange = (nextStyle: PromotionDisplayStyle) => {
+    setDisplayStyle(nextStyle);
+    if (!editingId) {
+      if (nextStyle === 'flotante' && position === 'bajo_logo') {
+        setPosition(placement === 'skyscraper' ? 'lateral_derecho' : 'flotante_derecha');
+      } else if (
+        nextStyle === 'fija' &&
+        (position === 'flotante_derecha' ||
+          position === 'flotante_izquierda' ||
+          position === 'lateral_izquierdo' ||
+          position === 'lateral_derecho')
+      ) {
+        setPosition('bajo_logo');
+      }
+    }
   };
 
   const handleSelectImage = (file: File | null) => {
@@ -79,7 +154,13 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
     setSubtitle(promo.subtitle);
     setBadgeText(promo.badgeText);
     setLinkUrl(promo.linkUrl);
-    setPlacement(promo.placement);
+    setPlacement(
+      promo.placement === 'rectangulo' || promo.placement === 'vertical'
+        ? 'skyscraper'
+        : promo.placement
+    );
+    setDisplayStyle(promo.displayStyle ?? 'fija');
+    setPosition(promo.position ?? 'bajo_logo');
     setStatus(promo.status);
     setImageFile(null);
     setImagePreview(promo.imageUrl);
@@ -109,10 +190,13 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
     try {
       let finalImageUrl = imagePreview;
       if (imageFile) {
-        finalImageUrl = await uploadMediaImage(
-          imageFile,
-          placement === 'banner' ? 'banner' : 'cover'
-        );
+        const uploadKind =
+          placement === 'banner'
+            ? 'banner'
+            : placement === 'skyscraper' || placement === 'vertical' || placement === 'rectangulo'
+              ? 'skyscraper'
+              : 'cover';
+        finalImageUrl = await uploadMediaImage(imageFile, uploadKind);
       } else if (finalImageUrl.startsWith('blob:')) {
         finalImageUrl = '';
       }
@@ -125,6 +209,8 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
           imageUrl: finalImageUrl,
           linkUrl,
           placement,
+          position,
+          displayStyle,
           status,
         });
         setSuccessMessage('Publicidad actualizada y visible en la página.');
@@ -136,6 +222,8 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
           imageUrl: finalImageUrl,
           linkUrl,
           placement,
+          position,
+          displayStyle,
           status,
         });
         setSuccessMessage(
@@ -302,36 +390,74 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-[#0B1E3D] mb-1.5">Formato</label>
-                <select
-                  value={placement}
-                  onChange={(e) => setPlacement(e.target.value as PromotionPlacement)}
-                  className={inputClass}
-                >
-                  <option value="banner">Banner ancho</option>
-                  <option value="tarjeta">Tarjeta</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[#0B1E3D] mb-1.5">Estado</label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as PromotionStatus)}
-                  className={inputClass}
-                >
-                  <option value="Activo">Activo</option>
-                  <option value="Pausado">Pausado</option>
-                </select>
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-[#0B1E3D] mb-1.5">Estado</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as PromotionStatus)}
+                className={inputClass}
+              >
+                <option value="Activo">Activo</option>
+                <option value="Pausado">Pausado</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-[#0B1E3D] mb-1.5">Formato</label>
+              <select
+                value={placement}
+                onChange={(e) => handlePlacementChange(e.target.value as PromotionPlacement)}
+                className={inputClass}
+              >
+                <option value="banner">Banner ancho</option>
+                <option value="tarjeta">Tarjeta</option>
+                <option value="skyscraper">Banner Skyscraper (160×600 px)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[#0B1E3D] mb-1.5">Estilo</label>
+              <select
+                value={displayStyle}
+                onChange={(e) =>
+                  handleDisplayStyleChange(e.target.value as PromotionDisplayStyle)
+                }
+                className={inputClass}
+              >
+                {PROMOTION_DISPLAY_STYLES.map((style) => (
+                  <option key={style} value={style}>
+                    {DISPLAY_STYLE_LABELS[style]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[#0B1E3D] mb-1.5">
+                Posición en la página
+              </label>
+              <select
+                value={position}
+                onChange={(e) => handlePositionChange(e.target.value as PromotionPosition)}
+                className={inputClass}
+              >
+                {PROMOTION_POSITIONS.map((pos) => (
+                  <option key={pos} value={pos}>
+                    {POSITION_LABELS[pos]}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
           {/* Image Upload Zone */}
           <div>
             <label className="block text-sm font-medium text-[#0B1E3D] mb-1.5">
-              Imagen publicitaria (opcional — recomendada 1200×320 px para banner o 600×400 px para tarjeta)
+              {placement === 'skyscraper'
+                ? 'Imagen Skyscraper vertical (recomendada 160×600 px o 320×1200 px — se muestra completa sin recorte)'
+                : 'Imagen publicitaria (opcional — recomendada 1200×320 px para banner o 600×400 px para tarjeta)'}
             </label>
             <div
               onDragOver={(e) => {
@@ -349,17 +475,31 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
               }`}
             >
               {imagePreview ? (
-                <div className="w-full sm:w-52 h-28 rounded-xl overflow-hidden bg-[#031B49] border border-[#00A3FF]/35 shrink-0">
+                <div
+                  className={`rounded-xl overflow-hidden bg-[#021230] border border-[#00A3FF]/35 shrink-0 ${
+                    placement === 'skyscraper'
+                      ? 'w-20 h-[300px]'
+                      : 'w-full sm:w-52 h-28'
+                  }`}
+                >
                   <img
                     src={imagePreview}
                     alt="Vista previa de publicidad"
-                    className="w-full h-full object-cover"
+                    className={`w-full h-full ${
+                      placement === 'skyscraper' ? 'object-contain' : 'object-cover'
+                    }`}
                   />
                 </div>
               ) : (
-                <div className="w-full sm:w-52 h-28 rounded-xl bg-white border border-blue-200 flex flex-col items-center justify-center text-slate-400 text-xs shrink-0">
+                <div
+                  className={`rounded-xl bg-white border border-blue-200 flex flex-col items-center justify-center text-slate-400 text-xs text-center px-2 shrink-0 ${
+                    placement === 'skyscraper'
+                      ? 'w-20 h-[300px]'
+                      : 'w-full sm:w-52 h-28'
+                  }`}
+                >
                   <ImagePlus className="w-6 h-6 text-[#0052CC] mb-1" />
-                  <span>Sin imagen</span>
+                  <span>{placement === 'skyscraper' ? '160×600 px' : 'Sin imagen'}</span>
                 </div>
               )}
 
@@ -469,7 +609,13 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
                     <img
                       src={promo.imageUrl}
                       alt={promo.title}
-                      className="w-20 h-14 object-cover rounded-lg border border-blue-200 shrink-0"
+                      className={`rounded-lg border border-blue-200 shrink-0 ${
+                        promo.placement === 'skyscraper' ||
+                        promo.placement === 'vertical' ||
+                        promo.placement === 'rectangulo'
+                          ? 'w-8 h-24 object-contain bg-[#021230]'
+                          : 'w-20 h-14 object-cover'
+                      }`}
                     />
                   ) : (
                     <div className="w-20 h-14 rounded-lg bg-[#031B49] text-[#7FE000] flex items-center justify-center shrink-0">
@@ -492,7 +638,13 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
                         {promo.status}
                       </span>
                       <span className="text-[11px] font-mono text-slate-500">
-                        {promo.placement === 'banner' ? 'Banner ancho' : 'Tarjeta'}
+                        {PLACEMENT_LABELS[promo.placement] ?? promo.placement}
+                      </span>
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-blue-100 text-[#0052CC]">
+                        {(promo.displayStyle ?? 'fija') === 'flotante' ? 'Flotante' : 'Fija'}
+                      </span>
+                      <span className="text-[11px] text-slate-600">
+                        {POSITION_LABELS[promo.position ?? 'bajo_logo']}
                       </span>
                     </div>
                     {promo.subtitle && (

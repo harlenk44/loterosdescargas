@@ -25,7 +25,20 @@ export type ProgramPlatform = (typeof PROGRAM_PLATFORMS)[number];
 export type ReleaseChannel = (typeof RELEASE_CHANNELS)[number];
 export type CommentCategory = (typeof COMMENT_CATEGORIES)[number];
 export type ProgramStatus = 'Activo' | 'Archivado';
-export type PromotionPlacement = 'banner' | 'tarjeta';
+export type PromotionPlacement = 'banner' | 'tarjeta' | 'skyscraper' | 'rectangulo' | 'vertical';
+export const PROMOTION_POSITIONS = [
+  'arriba',
+  'bajo_logo',
+  'sobre_programas',
+  'abajo',
+  'flotante_derecha',
+  'flotante_izquierda',
+  'lateral_izquierdo',
+  'lateral_derecho',
+] as const;
+export type PromotionPosition = (typeof PROMOTION_POSITIONS)[number];
+export const PROMOTION_DISPLAY_STYLES = ['fija', 'flotante'] as const;
+export type PromotionDisplayStyle = (typeof PROMOTION_DISPLAY_STYLES)[number];
 export type PromotionStatus = 'Activo' | 'Pausado';
 
 export const DEFAULT_FEATURED_LINK = {
@@ -197,6 +210,8 @@ export interface PromotionRecord {
   imageUrl: string;
   linkUrl: string;
   placement: PromotionPlacement;
+  position?: PromotionPosition;
+  displayStyle?: PromotionDisplayStyle;
   status: PromotionStatus;
   ownerId: string;
   createdAt?: Timestamp | null;

@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
   Download,
-  ExternalLink,
   FolderArchive,
   Image as ImageIcon,
   Lock,
@@ -37,6 +36,7 @@ import { TopBar, type AppSection } from './components/TopBar';
 import { ProgramUploadForm } from './components/ProgramUploadForm';
 import { ProgramDetailView } from './components/ProgramDetailView';
 import { PromotionsManager } from './components/PromotionsManager';
+import { FloatingPromotionsOverlay, InlinePromotionSlot } from './components/PromotionSlot';
 import { getDefaultMediaForProgram } from './lib/programMedia';
 
 const LOGO_URL = '/assets/aistudio/Loteros_Descargas__Logo_Tecnol_gico_06091cd3.png';
@@ -78,6 +78,8 @@ export default function App() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [updatingImageId, setUpdatingImageId] = useState<string | null>(null);
   const [brokenImageIds, setBrokenImageIds] = useState<Record<string, boolean>>({});
+  const [brokenPromoImageIds, setBrokenPromoImageIds] = useState<Record<string, boolean>>({});
+  const [dismissedPromoIds, setDismissedPromoIds] = useState<Record<string, boolean>>({});
   const [updatingPlatformId, setUpdatingPlatformId] = useState<string | null>(null);
   const [optimisticPlatforms, setOptimisticPlatforms] = useState<Record<string, ProgramPlatform>>({});
   const [downloadFeedback, setDownloadFeedback] = useState<string | null>(null);
@@ -298,6 +300,48 @@ export default function App() {
     [displayPrograms, selectedProgramId]
   );
 
+  const isCatalogOverview = activeSection === 'catalogo' && !selectedProgram;
+
+  const hasFloatingLeft = useMemo(
+    () =>
+      isCatalogOverview &&
+      activePromotions.some(
+        (ad) =>
+          ad.displayStyle === 'flotante' &&
+          ad.position === 'lateral_izquierdo' &&
+          !dismissedPromoIds[ad.id]
+      ),
+    [isCatalogOverview, activePromotions, dismissedPromoIds]
+  );
+
+  const hasFloatingRight = useMemo(
+    () =>
+      isCatalogOverview &&
+      activePromotions.some(
+        (ad) =>
+          ad.displayStyle === 'flotante' &&
+          ad.position === 'lateral_derecho' &&
+          !dismissedPromoIds[ad.id]
+      ),
+    [isCatalogOverview, activePromotions, dismissedPromoIds]
+  );
+
+  const mainContainerClass =
+    hasFloatingLeft || hasFloatingRight
+      ? `flex-1 max-w-[1680px] w-full mx-auto px-4 sm:px-6 ${
+          hasFloatingLeft ? 'lg:pl-[188px] xl:pl-[196px]' : 'lg:pl-8'
+        } ${
+          hasFloatingRight ? 'lg:pr-[188px] xl:pr-[196px]' : 'lg:pr-8'
+        } py-6 sm:py-8 space-y-8`
+      : 'flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-8';
+
+  const catalogGridClass =
+    hasFloatingLeft && hasFloatingRight
+      ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5'
+      : hasFloatingLeft || hasFloatingRight
+        ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 gap-5'
+        : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-5';
+
   const selectedStarterVersion = useMemo(() => {
     if (!showingStarterFallback || !selectedProgramId) return null;
     return starterCatalogView.find((s) => s.program.id === selectedProgramId)?.version ?? null;
@@ -481,7 +525,7 @@ export default function App() {
         onSignOut={handleSignOut}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-8">
+      <main className={mainContainerClass}>
         {authError && (
           <div
             role="alert"
@@ -575,6 +619,13 @@ export default function App() {
           <>
             {/* Brand Logo Showcase & Active Advertisements */}
             <section aria-label="Marca principal y publicidad" className="space-y-5">
+              <InlinePromotionSlot
+                promotions={activePromotions}
+                position="arriba"
+                brokenImages={brokenPromoImageIds}
+                onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+              />
+
               <div className="rounded-2xl bg-[#041B47]/72 backdrop-blur-md border border-[#00A3FF]/30 px-5 py-4 sm:px-7 sm:py-5 shadow-[0_12px_32px_rgba(0,12,42,0.42)] flex flex-col md:flex-row items-center justify-between gap-4">
                 <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 text-center sm:text-left min-w-0">
                   <img
@@ -605,134 +656,36 @@ export default function App() {
                 )}
               </div>
 
-              {/* Active Page Advertisements / Banners */}
-              {activePromotions.length > 0 && (
-                <div className="space-y-3">
-                  {activePromotions
-                    .filter((ad) => ad.placement === 'banner')
-                    .map((ad) => {
-                      const hasBannerText =
-                        (ad.title && ad.title !== 'Publicidad') || Boolean(ad.subtitle);
-                      const content = (
-                        <div className="relative rounded-2xl overflow-hidden bg-[#041B47]/88 backdrop-blur-md border border-[#00A3FF]/40 hover:border-[#7FE000] transition-all shadow-[0_10px_28px_rgba(0,10,36,0.45)] flex flex-col">
-                          {ad.imageUrl && (
-                            <div className="w-full overflow-hidden bg-[#021230]">
-                              <img
-                                src={ad.imageUrl}
-                                alt={ad.title || 'Publicidad'}
-                                referrerPolicy="no-referrer"
-                                className="w-full max-h-60 object-contain mx-auto block"
-                              />
-                            </div>
-                          )}
-                          {(hasBannerText || !ad.imageUrl || ad.linkUrl) && (
-                            <div className="px-4 py-3 sm:px-5 sm:py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-t border-white/10">
-                              <div className="space-y-0.5 min-w-0">
-                                {ad.badgeText && (
-                                  <span className="inline-block text-[10px] font-bold uppercase tracking-wider text-[#7FE000]">
-                                    {ad.badgeText}
-                                  </span>
-                                )}
-                                {hasBannerText && (
-                                  <h3 className="font-display text-sm sm:text-base font-bold text-white leading-snug">
-                                    {ad.title}
-                                  </h3>
-                                )}
-                                {ad.subtitle && (
-                                  <p className="text-xs text-blue-100/85 line-clamp-2">
-                                    {ad.subtitle}
-                                  </p>
-                                )}
-                              </div>
-                              {ad.linkUrl && (
-                                <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0052CC] text-white text-xs font-semibold shrink-0 self-start sm:self-center">
-                                  Ver más
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-
-                      return ad.linkUrl ? (
-                        <a
-                          key={ad.id}
-                          href={ad.linkUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block"
-                        >
-                          {content}
-                        </a>
-                      ) : (
-                        <div key={ad.id}>{content}</div>
-                      );
-                    })}
-
-                  {activePromotions.some((ad) => ad.placement === 'tarjeta') && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {activePromotions
-                        .filter((ad) => ad.placement === 'tarjeta')
-                        .map((ad) => {
-                          const cardInner = (
-                            <div className="h-full rounded-2xl overflow-hidden bg-[#041B47]/88 backdrop-blur-md border border-[#00A3FF]/40 hover:border-[#7FE000] transition-all shadow-lg flex flex-col">
-                              {ad.imageUrl && (
-                                <div className="h-36 w-full overflow-hidden bg-[#021230]">
-                                  <img
-                                    src={ad.imageUrl}
-                                    alt={ad.title}
-                                    referrerPolicy="no-referrer"
-                                    className="w-full h-full object-cover"
-                                  />
-                                </div>
-                              )}
-                              <div className="p-4 flex-1 flex flex-col justify-between gap-2">
-                                <div className="space-y-1">
-                                  {ad.badgeText && (
-                                    <span className="inline-block text-[10px] font-bold uppercase tracking-wider text-[#7FE000]">
-                                      {ad.badgeText}
-                                    </span>
-                                  )}
-                                  <h3 className="font-display text-sm font-bold text-white leading-snug">
-                                    {ad.title}
-                                  </h3>
-                                  {ad.subtitle && (
-                                    <p className="text-xs text-blue-100/80 line-clamp-2">
-                                      {ad.subtitle}
-                                    </p>
-                                  )}
-                                </div>
-                                {ad.linkUrl && (
-                                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#7AD7FF]">
-                                    Abrir enlace
-                                    <ExternalLink className="w-3 h-3" />
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          );
-
-                          return ad.linkUrl ? (
-                            <a
-                              key={ad.id}
-                              href={ad.linkUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="block h-full"
-                            >
-                              {cardInner}
-                            </a>
-                          ) : (
-                            <div key={ad.id} className="h-full">
-                              {cardInner}
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                </div>
-              )}
+              <InlinePromotionSlot
+                promotions={activePromotions}
+                position="bajo_logo"
+                brokenImages={brokenPromoImageIds}
+                onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+              />
+              <InlinePromotionSlot
+                promotions={activePromotions}
+                position="flotante_izquierda"
+                brokenImages={brokenPromoImageIds}
+                onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+              />
+              <InlinePromotionSlot
+                promotions={activePromotions}
+                position="flotante_derecha"
+                brokenImages={brokenPromoImageIds}
+                onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+              />
+              <InlinePromotionSlot
+                promotions={activePromotions}
+                position="lateral_izquierdo"
+                brokenImages={brokenPromoImageIds}
+                onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+              />
+              <InlinePromotionSlot
+                promotions={activePromotions}
+                position="lateral_derecho"
+                brokenImages={brokenPromoImageIds}
+                onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+              />
             </section>
 
             {/* Catalog Section Header + Platform Underline Tabs (Windows / Android / Utilidades / Impresión) */}
@@ -797,6 +750,13 @@ export default function App() {
                   );
                 })}
               </div>
+
+              <InlinePromotionSlot
+                promotions={activePromotions}
+                position="sobre_programas"
+                brokenImages={brokenPromoImageIds}
+                onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+              />
             </section>
 
             {/* Starter notice strictly for owner */}
@@ -827,7 +787,7 @@ export default function App() {
 
             {/* FIRST VISUAL ANCHOR: 6-Column Square Program Tiles */}
             {programsLoading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-5">
+              <div className={catalogGridClass}>
                 {[1, 2, 3, 4, 5, 6].map((idx) => (
                   <div key={idx} className="space-y-2.5 animate-pulse">
                     <div className="aspect-square bg-[#06245C]/70 rounded-2xl border border-[#00A3FF]/25" />
@@ -888,7 +848,7 @@ export default function App() {
             ) : (
               <section
                 aria-label="Catálogo de programas"
-                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-5"
+                className={catalogGridClass}
               >
                 {filteredPrograms.map((prog) => {
                   const defaults = getDefaultMediaForProgram(prog.slug || prog.category);
@@ -1028,6 +988,13 @@ export default function App() {
                 })}
               </section>
             )}
+
+            <InlinePromotionSlot
+              promotions={activePromotions}
+              position="abajo"
+              brokenImages={brokenPromoImageIds}
+              onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+            />
           </>
         ) : activeSection === 'publicidad' ? (
           isAdmin ? (
@@ -1135,6 +1102,15 @@ export default function App() {
           </div>
         </div>
       </footer>
+      {isCatalogOverview && (
+        <FloatingPromotionsOverlay
+          promotions={activePromotions}
+          dismissedIds={dismissedPromoIds}
+          onDismiss={(id) => setDismissedPromoIds((prev) => ({ ...prev, [id]: true }))}
+          brokenImages={brokenPromoImageIds}
+          onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+        />
+      )}
     </div>
   );
 }
