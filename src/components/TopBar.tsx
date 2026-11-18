@@ -1,7 +1,7 @@
 import React from 'react';
 import type { User } from 'firebase/auth';
 
-export type AppSection = 'catalogo' | 'subir' | 'publicidad';
+export type AppSection = 'catalogo' | 'contacto' | 'subir' | 'publicidad';
 
 const LOGO_URL = '/assets/aistudio/Loteros_Descargas__Logo_Tecnol_gico_06091cd3.png';
 
@@ -28,6 +28,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   const navItems: Array<{ id: AppSection; label: string }> = [
     { id: 'catalogo', label: 'Catálogo' },
+    { id: 'contacto', label: 'Contacto y Pago' },
     ...(isAdmin
       ? [
           { id: 'subir' as const, label: 'Subir Programa' },

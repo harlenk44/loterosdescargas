@@ -78,8 +78,13 @@ function decodeRestField(val: FirestoreRestField | undefined): unknown {
   return undefined;
 }
 
-async function runFirestoreRestQuery<T>(structuredQuery: Record<string, unknown>): Promise<T[]> {
-  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(firebaseConfig.projectId)}/databases/${encodeURIComponent(firebaseConfig.firestoreDatabaseId)}/documents:runQuery?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
+async function runFirestoreRestQuery<T>(
+  structuredQuery: Record<string, unknown>,
+  parentSubpath = ''
+): Promise<T[]> {
+  const cleanSubpath = parentSubpath.replace(/^\/+|\/+$/g, '');
+  const basePath = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(firebaseConfig.projectId)}/databases/${encodeURIComponent(firebaseConfig.firestoreDatabaseId)}/documents${cleanSubpath ? `/${cleanSubpath}` : ''}`;
+  const url = `${basePath}:runQuery?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
   const token = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => '') : '';
   const res = await fetch(url, {
     method: 'POST',
@@ -238,16 +243,19 @@ export async function fetchProgramVersionsOnce(programId: string): Promise<Progr
     return sortProgramVersions(items);
   } catch {
     try {
-      const items = await runFirestoreRestQuery<ProgramVersionRecord>({
-        from: [{ collectionId: 'versions' }],
-        where: {
-          fieldFilter: {
-            field: { fieldPath: 'programId' },
-            op: 'EQUAL',
-            value: { stringValue: programId },
+      const items = await runFirestoreRestQuery<ProgramVersionRecord>(
+        {
+          from: [{ collectionId: 'versions' }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'programId' },
+              op: 'EQUAL',
+              value: { stringValue: programId },
+            },
           },
         },
-      });
+        `programs/${encodeURIComponent(programId)}`
+      );
       return sortProgramVersions(items);
     } catch {
       return [];
@@ -308,10 +316,16 @@ export function subscribeProgramComments(
 }
 
 export async function fetchStarterCatalog(): Promise<StarterProgramItem[]> {
-  const res = await fetch('/api/starter-catalog');
-  if (!res.ok) return [];
-  const data = (await res.json()) as { items?: StarterProgramItem[] };
-  return data.items ?? [];
+  try {
+    const res = await fetch('/api/starter-catalog');
+    if (!res.ok) return [];
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) return [];
+    const data = (await res.json()) as { items?: StarterProgramItem[] };
+    return data.items ?? [];
+  } catch {
+    return [];
+  }
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -1193,6 +1207,9 @@ export async function verifyUpdateSignature(payload: {
 export function normalizeExternalUrl(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return '';
+  if (trimmed.toLowerCase() === '#contacto' || trimmed.toLowerCase() === '/contacto') {
+    return '#contacto';
+  }
   if (/^(javascript|data|vbscript):/i.test(trimmed)) {
     throw new Error('Por seguridad, ingresa una dirección web válida (https://...).');
   }
@@ -1216,6 +1233,16 @@ export function subscribeSiteSettings(
           featuredLinkLabel: DEFAULT_FEATURED_LINK.label,
           featuredLinkUrl: DEFAULT_FEATURED_LINK.url,
           featuredLinkImageUrl: DEFAULT_FEATURED_LINK.imageUrl,
+          contactHeadline: '',
+          contactSubtitle: '',
+          contactWhatsapp: '',
+          contactEmail: '',
+          contactTelegram: '',
+          contactSchedule: '',
+          paymentPagoMovil: '',
+          paymentZelle: '',
+          paymentBinance: '',
+          paymentNotes: '',
           updatedBy: '',
         });
         return;
@@ -1224,6 +1251,16 @@ export function subscribeSiteSettings(
       onData({
         ...data,
         featuredLinkImageUrl: data.featuredLinkImageUrl || '',
+        contactHeadline: data.contactHeadline || '',
+        contactSubtitle: data.contactSubtitle || '',
+        contactWhatsapp: data.contactWhatsapp || '',
+        contactEmail: data.contactEmail || '',
+        contactTelegram: data.contactTelegram || '',
+        contactSchedule: data.contactSchedule || '',
+        paymentPagoMovil: data.paymentPagoMovil || '',
+        paymentZelle: data.paymentZelle || '',
+        paymentBinance: data.paymentBinance || '',
+        paymentNotes: data.paymentNotes || '',
       });
     },
     (error) => {
@@ -1273,6 +1310,60 @@ export async function saveFeaturedLinkSettings(input: {
         featuredLinkLabel: cleanLabel,
         featuredLinkUrl: cleanUrl,
         featuredLinkImageUrl: cleanImageUrl,
+        updatedBy: user.uid,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'siteSettings/main');
+  }
+}
+
+export async function saveContactPaymentSettings(input: {
+  contactHeadline: string;
+  contactSubtitle: string;
+  contactWhatsapp: string;
+  contactEmail: string;
+  contactTelegram: string;
+  contactSchedule: string;
+  paymentPagoMovil: string;
+  paymentZelle: string;
+  paymentBinance: string;
+  paymentNotes: string;
+}): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sesión de administrador requerida.');
+
+  const payload = {
+    contactHeadline: input.contactHeadline.trim().slice(0, SCHEMA_LIMITS.CONTACT_HEADLINE_MAX),
+    contactSubtitle: input.contactSubtitle.trim().slice(0, SCHEMA_LIMITS.CONTACT_SUBTITLE_MAX),
+    contactWhatsapp: input.contactWhatsapp.trim().slice(0, SCHEMA_LIMITS.CONTACT_WHATSAPP_MAX),
+    contactEmail: input.contactEmail.trim().slice(0, SCHEMA_LIMITS.CONTACT_EMAIL_MAX),
+    contactTelegram: input.contactTelegram.trim().slice(0, SCHEMA_LIMITS.CONTACT_TELEGRAM_MAX),
+    contactSchedule: input.contactSchedule.trim().slice(0, SCHEMA_LIMITS.CONTACT_SCHEDULE_MAX),
+    paymentPagoMovil: input.paymentPagoMovil.trim().slice(0, SCHEMA_LIMITS.PAYMENT_PAGOMOVIL_MAX),
+    paymentZelle: input.paymentZelle.trim().slice(0, SCHEMA_LIMITS.PAYMENT_ZELLE_MAX),
+    paymentBinance: input.paymentBinance.trim().slice(0, SCHEMA_LIMITS.PAYMENT_BINANCE_MAX),
+    paymentNotes: input.paymentNotes.trim().slice(0, SCHEMA_LIMITS.PAYMENT_NOTES_MAX),
+  };
+
+  const ref = doc(db, 'siteSettings', 'main');
+  try {
+    const existingSnap = await getDoc(ref);
+    if (!existingSnap.exists()) {
+      await setDoc(ref, {
+        id: 'main',
+        featuredLinkLabel: DEFAULT_FEATURED_LINK.label,
+        featuredLinkUrl: DEFAULT_FEATURED_LINK.url,
+        featuredLinkImageUrl: DEFAULT_FEATURED_LINK.imageUrl,
+        ...payload,
+        updatedBy: user.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await updateDoc(ref, {
+        ...payload,
         updatedBy: user.uid,
         updatedAt: serverTimestamp(),
       });

@@ -27,6 +27,7 @@ import {
   recordProgramDownload,
   subscribePrograms,
   subscribePromotions,
+  subscribeSiteSettings,
   updateProgramSettings,
   uploadMediaImage,
 } from './lib/repositoryApi';
@@ -37,13 +38,16 @@ import {
   type ProgramPlatform,
   type ProgramRecord,
   type ProgramVersionRecord,
+  type PromotionPosition,
   type PromotionRecord,
+  type SiteSettingsRecord,
   type StarterProgramItem,
 } from './types/repository';
 import { TopBar, type AppSection } from './components/TopBar';
 import { ProgramUploadForm } from './components/ProgramUploadForm';
 import { ProgramDetailView } from './components/ProgramDetailView';
 import { PromotionsManager } from './components/PromotionsManager';
+import { ContactPaymentView } from './components/ContactPaymentView';
 import { FloatingPromotionsOverlay, InlinePromotionSlot } from './components/PromotionSlot';
 import { getDefaultMediaForProgram } from './lib/programMedia';
 
@@ -69,8 +73,13 @@ export default function App() {
   const [importingAllStarter, setImportingAllStarter] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
 
-  // Promotions State
+  // Promotions & Site Settings State
   const [promotions, setPromotions] = useState<PromotionRecord[]>([]);
+  const [siteSettings, setSiteSettings] = useState<SiteSettingsRecord | null>(null);
+  const [promoInitialPosition, setPromoInitialPosition] = useState<PromotionPosition | undefined>(
+    undefined
+  );
+  const [contactContextProgram, setContactContextProgram] = useState<string | undefined>(undefined);
 
   // Filters & Quick Owner Controls
   const [searchQuery, setSearchQuery] = useState('');
@@ -145,8 +154,16 @@ export default function App() {
 
     void fetchStarterCatalog().then(setStarterItems);
 
+    const unsubSettings = subscribeSiteSettings(
+      (settings) => setSiteSettings(settings),
+      () => {
+        // Non-blocking fallback when siteSettings/main does not exist yet
+      }
+    );
+
     return () => {
       unsubPrograms();
+      unsubSettings();
     };
   }, []);
 
@@ -240,8 +257,27 @@ export default function App() {
       setActiveSection('catalogo');
       return;
     }
+    if (section !== 'publicidad') {
+      setPromoInitialPosition(undefined);
+    }
+    if (section !== 'contacto') {
+      setContactContextProgram(undefined);
+    }
     setActiveSection(section);
     setSelectedProgramId(null);
+  };
+
+  const handleOpenContact = (programName?: string) => {
+    setContactContextProgram(programName);
+    setSelectedProgramId(null);
+    setActiveSection('contacto');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleInternalPromoAction = (target: string, programName?: string) => {
+    if (target === '#contacto') {
+      handleOpenContact(programName);
+    }
   };
 
   const starterCatalogView = useMemo(() => {
@@ -864,10 +900,30 @@ export default function App() {
                   }
                 : undefined
             }
+            promotions={activePromotions}
+            brokenPromoImages={brokenPromoImageIds}
+            onPromoImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+            onOpenContact={(progName) => handleOpenContact(progName)}
+            onManageDetailAds={
+              isAdmin
+                ? () => {
+                    setPromoInitialPosition('detalle_arriba');
+                    setSelectedProgramId(null);
+                    setActiveSection('publicidad');
+                  }
+                : undefined
+            }
             user={user}
             isAdmin={isAdmin}
             onBack={() => setSelectedProgramId(null)}
             onSignIn={handleSignIn}
+          />
+        ) : activeSection === 'contacto' ? (
+          <ContactPaymentView
+            siteSettings={siteSettings}
+            isAdmin={isAdmin}
+            contextProgramName={contactContextProgram}
+            onBack={() => handleNavigate('catalogo')}
           />
         ) : activeSection === 'catalogo' ? (
           <>
@@ -878,6 +934,7 @@ export default function App() {
                 position="arriba"
                 brokenImages={brokenPromoImageIds}
                 onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+                onInternalAction={(t) => handleInternalPromoAction(t)}
               />
 
               <div className="rounded-2xl bg-[#041B47]/72 backdrop-blur-md border border-[#00A3FF]/30 px-5 py-4 sm:px-7 sm:py-5 shadow-[0_12px_32px_rgba(0,12,42,0.42)] flex flex-col md:flex-row items-center justify-between gap-4">
@@ -915,30 +972,35 @@ export default function App() {
                 position="bajo_logo"
                 brokenImages={brokenPromoImageIds}
                 onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+                onInternalAction={(t) => handleInternalPromoAction(t)}
               />
               <InlinePromotionSlot
                 promotions={activePromotions}
                 position="flotante_izquierda"
                 brokenImages={brokenPromoImageIds}
                 onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+                onInternalAction={(t) => handleInternalPromoAction(t)}
               />
               <InlinePromotionSlot
                 promotions={activePromotions}
                 position="flotante_derecha"
                 brokenImages={brokenPromoImageIds}
                 onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+                onInternalAction={(t) => handleInternalPromoAction(t)}
               />
               <InlinePromotionSlot
                 promotions={activePromotions}
                 position="lateral_izquierdo"
                 brokenImages={brokenPromoImageIds}
                 onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+                onInternalAction={(t) => handleInternalPromoAction(t)}
               />
               <InlinePromotionSlot
                 promotions={activePromotions}
                 position="lateral_derecho"
                 brokenImages={brokenPromoImageIds}
                 onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+                onInternalAction={(t) => handleInternalPromoAction(t)}
               />
             </section>
 
@@ -1088,6 +1150,7 @@ export default function App() {
                 position="sobre_programas"
                 brokenImages={brokenPromoImageIds}
                 onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+                onInternalAction={(t) => handleInternalPromoAction(t)}
               />
             </section>
 
@@ -1464,13 +1527,16 @@ export default function App() {
               position="abajo"
               brokenImages={brokenPromoImageIds}
               onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+              onInternalAction={(t) => handleInternalPromoAction(t)}
             />
           </>
         ) : activeSection === 'publicidad' ? (
           isAdmin ? (
             <div className="max-w-4xl mx-auto">
               <PromotionsManager
+                key={promoInitialPosition ?? 'default'}
                 promotions={promotions}
+                initialPosition={promoInitialPosition}
                 onDone={() => handleNavigate('catalogo')}
               />
             </div>
@@ -1552,6 +1618,13 @@ export default function App() {
             >
               Catálogo
             </button>
+            <button
+              type="button"
+              onClick={() => handleOpenContact()}
+              className="font-medium hover:text-[#7FE000] cursor-pointer"
+            >
+              Contacto y Pago
+            </button>
             {isAdmin && (
               <>
                 <button
@@ -1580,6 +1653,7 @@ export default function App() {
           onDismiss={(id) => setDismissedPromoIds((prev) => ({ ...prev, [id]: true }))}
           brokenImages={brokenPromoImageIds}
           onImageError={(id) => setBrokenPromoImageIds((prev) => ({ ...prev, [id]: true }))}
+          onInternalAction={(t) => handleInternalPromoAction(t)}
         />
       )}
     </div>

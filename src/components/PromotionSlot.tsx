@@ -107,7 +107,7 @@ function AdCardContent({
             </div>
             {ad.linkUrl && (
               <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0052CC] text-white text-xs font-semibold shrink-0 self-start sm:self-center">
-                Ver más
+                {ad.linkUrl === '#contacto' ? 'Contacto y Pago' : 'Ver más'}
                 <ExternalLink className="w-3.5 h-3.5" />
               </span>
             )}
@@ -153,7 +153,7 @@ function AdCardContent({
           </div>
           {ad.linkUrl && (
             <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#7AD7FF]">
-              Abrir enlace
+              {ad.linkUrl === '#contacto' ? 'Contacto y Pago' : 'Abrir enlace'}
               <ExternalLink className="w-3 h-3" />
             </span>
           )}
@@ -168,7 +168,8 @@ export const InlinePromotionSlot: React.FC<{
   position: PromotionPosition;
   brokenImages: Record<string, boolean>;
   onImageError: (id: string) => void;
-}> = ({ promotions, position, brokenImages, onImageError }) => {
+  onInternalAction?: (target: string) => void;
+}> = ({ promotions, position, brokenImages, onImageError, onInternalAction }) => {
   const matching = promotions.filter(
     (ad) =>
       ad.status === 'Activo' &&
@@ -194,31 +195,54 @@ export const InlinePromotionSlot: React.FC<{
       ? 'flex flex-wrap justify-start gap-4'
       : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4';
 
+  const renderClickableAd = (
+    ad: PromotionRecord,
+    className: string,
+    children: React.ReactNode
+  ) => {
+    if (!ad.linkUrl) {
+      return (
+        <div key={ad.id} className={className}>
+          {children}
+        </div>
+      );
+    }
+    if (ad.linkUrl.startsWith('#')) {
+      return (
+        <button
+          key={ad.id}
+          type="button"
+          onClick={() => onInternalAction?.(ad.linkUrl)}
+          className={`block w-full text-left cursor-pointer ${className}`}
+        >
+          {children}
+        </button>
+      );
+    }
+    return (
+      <a
+        key={ad.id}
+        href={ad.linkUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`block ${className}`}
+      >
+        {children}
+      </a>
+    );
+  };
+
   return (
     <div className={`space-y-3 ${isLateralOnlyDesktop ? 'hidden lg:block' : ''}`}>
       {banners.map((ad) =>
-        ad.linkUrl ? (
-          <a
-            key={ad.id}
-            href={ad.linkUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block"
-          >
-            <AdCardContent
-              ad={ad}
-              brokenImages={brokenImages}
-              onImageError={onImageError}
-            />
-          </a>
-        ) : (
-          <div key={ad.id}>
-            <AdCardContent
-              ad={ad}
-              brokenImages={brokenImages}
-              onImageError={onImageError}
-            />
-          </div>
+        renderClickableAd(
+          ad,
+          '',
+          <AdCardContent
+            ad={ad}
+            brokenImages={brokenImages}
+            onImageError={onImageError}
+          />
         )
       )}
 
@@ -233,28 +257,14 @@ export const InlinePromotionSlot: React.FC<{
                 : isRightAligned || isLeftAligned
                   ? 'w-full sm:w-80'
                   : 'h-full';
-            return ad.linkUrl ? (
-              <a
-                key={ad.id}
-                href={ad.linkUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`block ${widthClass}`}
-              >
-                <AdCardContent
-                  ad={ad}
-                  brokenImages={brokenImages}
-                  onImageError={onImageError}
-                />
-              </a>
-            ) : (
-              <div key={ad.id} className={widthClass}>
-                <AdCardContent
-                  ad={ad}
-                  brokenImages={brokenImages}
-                  onImageError={onImageError}
-                />
-              </div>
+            return renderClickableAd(
+              ad,
+              widthClass,
+              <AdCardContent
+                ad={ad}
+                brokenImages={brokenImages}
+                onImageError={onImageError}
+              />
             );
           })}
         </div>
@@ -274,6 +284,8 @@ const FLOATING_ZONE_CLASSES: Record<PromotionPosition, string> = {
     'hidden lg:flex left-3 xl:left-5 top-1/2 -translate-y-1/2 w-[160px] max-h-[86vh] overflow-y-auto',
   lateral_derecho:
     'hidden lg:flex right-3 xl:right-5 top-1/2 -translate-y-1/2 w-[160px] max-h-[86vh] overflow-y-auto',
+  detalle_arriba: 'flex top-20 left-1/2 -translate-x-1/2 w-[min(94vw,760px)]',
+  detalle_abajo: 'flex bottom-4 left-1/2 -translate-x-1/2 w-[min(94vw,760px)]',
 };
 
 export const FloatingPromotionsOverlay: React.FC<{
@@ -282,7 +294,15 @@ export const FloatingPromotionsOverlay: React.FC<{
   onDismiss: (id: string) => void;
   brokenImages: Record<string, boolean>;
   onImageError: (id: string) => void;
-}> = ({ promotions, dismissedIds, onDismiss, brokenImages, onImageError }) => {
+  onInternalAction?: (target: string) => void;
+}> = ({
+  promotions,
+  dismissedIds,
+  onDismiss,
+  brokenImages,
+  onImageError,
+  onInternalAction,
+}) => {
   const floatingAds = promotions.filter(
     (ad) =>
       ad.status === 'Activo' &&
@@ -336,15 +356,26 @@ export const FloatingPromotionsOverlay: React.FC<{
             );
 
             return ad.linkUrl ? (
-              <a
-                key={ad.id}
-                href={ad.linkUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block pointer-events-auto"
-              >
-                {inner}
-              </a>
+              ad.linkUrl.startsWith('#') ? (
+                <button
+                  key={ad.id}
+                  type="button"
+                  onClick={() => onInternalAction?.(ad.linkUrl)}
+                  className="block text-left pointer-events-auto cursor-pointer"
+                >
+                  {inner}
+                </button>
+              ) : (
+                <a
+                  key={ad.id}
+                  href={ad.linkUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block pointer-events-auto"
+                >
+                  {inner}
+                </a>
+              )
             ) : (
               <div key={ad.id} className="pointer-events-auto">
                 {inner}

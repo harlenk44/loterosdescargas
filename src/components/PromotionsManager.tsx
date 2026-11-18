@@ -32,6 +32,8 @@ const POSITION_LABELS: Record<PromotionPosition, string> = {
   bajo_logo: 'Debajo del logo (principal)',
   sobre_programas: 'Encima de los programas',
   abajo: 'Abajo (debajo de los programas)',
+  detalle_arriba: 'Dentro de cada programa (arriba)',
+  detalle_abajo: 'Dentro de cada programa (abajo)',
   flotante_derecha: 'Esquina inferior derecha',
   flotante_izquierda: 'Esquina inferior izquierda',
   lateral_izquierdo: 'Lado izquierdo (Skyscraper flotante 160×600)',
@@ -53,11 +55,13 @@ const DISPLAY_STYLE_LABELS: Record<PromotionDisplayStyle, string> = {
 
 interface PromotionsManagerProps {
   promotions: PromotionRecord[];
+  initialPosition?: PromotionPosition;
   onDone?: () => void;
 }
 
 export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
   promotions,
+  initialPosition,
   onDone,
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -67,7 +71,7 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
   const [linkUrl, setLinkUrl] = useState('');
   const [placement, setPlacement] = useState<PromotionPlacement>('banner');
   const [displayStyle, setDisplayStyle] = useState<PromotionDisplayStyle>('fija');
-  const [position, setPosition] = useState<PromotionPosition>('bajo_logo');
+  const [position, setPosition] = useState<PromotionPosition>(initialPosition ?? 'bajo_logo');
   const [status, setStatus] = useState<PromotionStatus>('Activo');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState('');
@@ -117,6 +121,11 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
     ) {
       setDisplayStyle('flotante');
       setPlacement('skyscraper');
+    } else if (
+      !editingId &&
+      (nextPosition === 'detalle_arriba' || nextPosition === 'detalle_abajo')
+    ) {
+      setDisplayStyle('fija');
     }
   };
 
@@ -376,8 +385,8 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-[#0B1E3D] mb-1.5">
+            <div className="md:col-span-2 space-y-1.5">
+              <label className="block text-sm font-medium text-[#0B1E3D]">
                 Enlace al hacer clic (opcional)
               </label>
               <input
@@ -385,9 +394,18 @@ export const PromotionsManager: React.FC<PromotionsManagerProps> = ({
                 maxLength={SCHEMA_LIMITS.URL_MAX}
                 value={linkUrl}
                 onChange={(e) => setLinkUrl(e.target.value)}
-                placeholder="https://tupagina.com o wa.me/..."
+                placeholder="https://tupagina.com, wa.me/... o #contacto"
                 className={inputClass}
               />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLinkUrl('#contacto')}
+                  className="px-2.5 py-1 text-xs font-semibold text-[#0052CC] bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md cursor-pointer transition-colors"
+                >
+                  Apuntar a sección Contacto y Pago (#contacto)
+                </button>
+              </div>
             </div>
 
             <div>

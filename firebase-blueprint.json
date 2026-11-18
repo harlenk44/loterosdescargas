@@ -417,6 +417,66 @@
           "maxLength": 350000,
           "description": "Optional custom image or icon displayed on the featured button."
         },
+        "contactHeadline": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120,
+          "description": "Optional headline for the public Contact & Payment page."
+        },
+        "contactSubtitle": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300,
+          "description": "Optional subtitle for the public Contact & Payment page."
+        },
+        "contactWhatsapp": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 40,
+          "description": "Public business WhatsApp number for support, ads, and payment receipts."
+        },
+        "contactEmail": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120,
+          "description": "Public business contact email."
+        },
+        "contactTelegram": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120,
+          "description": "Optional public Telegram handle or link."
+        },
+        "contactSchedule": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120,
+          "description": "Public business hours."
+        },
+        "paymentPagoMovil": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300,
+          "description": "Pago Movil / local bank transfer details."
+        },
+        "paymentZelle": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200,
+          "description": "Zelle payment details."
+        },
+        "paymentBinance": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200,
+          "description": "Binance Pay / USDT payment details."
+        },
+        "paymentNotes": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1200,
+          "description": "Pricing plans, advertising packages, and payment instructions."
+        },
         "updatedBy": {
           "type": "string",
           "minLength": 1,
@@ -502,7 +562,9 @@
             "flotante_derecha",
             "flotante_izquierda",
             "lateral_izquierdo",
-            "lateral_derecho"
+            "lateral_derecho",
+            "detalle_arriba",
+            "detalle_abajo"
           ],
           "description": "Page placement zone for the promotion."
         },

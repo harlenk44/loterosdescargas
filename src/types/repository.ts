@@ -37,6 +37,8 @@ export const PROMOTION_POSITIONS = [
   'flotante_izquierda',
   'lateral_izquierdo',
   'lateral_derecho',
+  'detalle_arriba',
+  'detalle_abajo',
 ] as const;
 export type PromotionPosition = (typeof PROMOTION_POSITIONS)[number];
 export const PROMOTION_DISPLAY_STYLES = ['fija', 'flotante'] as const;
@@ -77,6 +79,16 @@ export const SCHEMA_LIMITS = {
   PROMO_TITLE_MAX: 100,
   PROMO_SUBTITLE_MAX: 240,
   PROMO_BADGE_MAX: 40,
+  CONTACT_HEADLINE_MAX: 120,
+  CONTACT_SUBTITLE_MAX: 300,
+  CONTACT_WHATSAPP_MAX: 40,
+  CONTACT_EMAIL_MAX: 120,
+  CONTACT_TELEGRAM_MAX: 120,
+  CONTACT_SCHEDULE_MAX: 120,
+  PAYMENT_PAGOMOVIL_MAX: 300,
+  PAYMENT_ZELLE_MAX: 200,
+  PAYMENT_BINANCE_MAX: 200,
+  PAYMENT_NOTES_MAX: 1200,
 } as const;
 
 export const SCHEMA_PATTERNS = {
@@ -203,6 +215,16 @@ export interface SiteSettingsRecord {
   featuredLinkLabel: string;
   featuredLinkUrl: string;
   featuredLinkImageUrl?: string;
+  contactHeadline?: string;
+  contactSubtitle?: string;
+  contactWhatsapp?: string;
+  contactEmail?: string;
+  contactTelegram?: string;
+  contactSchedule?: string;
+  paymentPagoMovil?: string;
+  paymentZelle?: string;
+  paymentBinance?: string;
+  paymentNotes?: string;
   updatedBy: string;
   createdAt?: Timestamp | null;
   updatedAt?: Timestamp | null;

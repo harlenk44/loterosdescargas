@@ -134,12 +134,26 @@ service cloud.firestore {
           'id', 'featuredLinkLabel', 'featuredLinkUrl', 'featuredLinkImageUrl', 'updatedBy', 'createdAt', 'updatedAt'
         ]) &&
         data.keys().hasOnly([
-          'id', 'featuredLinkLabel', 'featuredLinkUrl', 'featuredLinkImageUrl', 'updatedBy', 'createdAt', 'updatedAt'
+          'id', 'featuredLinkLabel', 'featuredLinkUrl', 'featuredLinkImageUrl',
+          'contactHeadline', 'contactSubtitle', 'contactWhatsapp', 'contactEmail',
+          'contactTelegram', 'contactSchedule', 'paymentPagoMovil', 'paymentZelle',
+          'paymentBinance', 'paymentNotes',
+          'updatedBy', 'createdAt', 'updatedAt'
         ]) &&
         data.id == 'main' &&
         data.featuredLinkLabel is string && data.featuredLinkLabel.size() >= 2 && data.featuredLinkLabel.size() <= 80 &&
         data.featuredLinkUrl is string && data.featuredLinkUrl.size() >= 8 && data.featuredLinkUrl.size() <= 500 &&
         data.featuredLinkImageUrl is string && data.featuredLinkImageUrl.size() <= 350000 &&
+        (!('contactHeadline' in data) || (data.contactHeadline is string && data.contactHeadline.size() <= 120)) &&
+        (!('contactSubtitle' in data) || (data.contactSubtitle is string && data.contactSubtitle.size() <= 300)) &&
+        (!('contactWhatsapp' in data) || (data.contactWhatsapp is string && data.contactWhatsapp.size() <= 40)) &&
+        (!('contactEmail' in data) || (data.contactEmail is string && data.contactEmail.size() <= 120)) &&
+        (!('contactTelegram' in data) || (data.contactTelegram is string && data.contactTelegram.size() <= 120)) &&
+        (!('contactSchedule' in data) || (data.contactSchedule is string && data.contactSchedule.size() <= 120)) &&
+        (!('paymentPagoMovil' in data) || (data.paymentPagoMovil is string && data.paymentPagoMovil.size() <= 300)) &&
+        (!('paymentZelle' in data) || (data.paymentZelle is string && data.paymentZelle.size() <= 200)) &&
+        (!('paymentBinance' in data) || (data.paymentBinance is string && data.paymentBinance.size() <= 200)) &&
+        (!('paymentNotes' in data) || (data.paymentNotes is string && data.paymentNotes.size() <= 1200)) &&
         isValidId(data.updatedBy) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
@@ -161,7 +175,7 @@ service cloud.firestore {
         data.imageUrl is string && data.imageUrl.size() <= 350000 &&
         data.linkUrl is string && data.linkUrl.size() <= 500 &&
         data.placement in ['banner', 'tarjeta', 'skyscraper', 'rectangulo', 'vertical'] &&
-        (!('position' in data) || data.position in ['arriba', 'bajo_logo', 'sobre_programas', 'abajo', 'flotante_derecha', 'flotante_izquierda', 'lateral_izquierdo', 'lateral_derecho']) &&
+        (!('position' in data) || data.position in ['arriba', 'bajo_logo', 'sobre_programas', 'abajo', 'flotante_derecha', 'flotante_izquierda', 'lateral_izquierdo', 'lateral_derecho', 'detalle_arriba', 'detalle_abajo']) &&
         (!('displayStyle' in data) || data.displayStyle in ['fija', 'flotante']) &&
         data.status in ['Activo', 'Pausado'] &&
         isValidId(data.ownerId) &&
@@ -332,7 +346,11 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         incoming().updatedBy == request.auth.uid &&
         incoming().diff(existing()).affectedKeys().hasOnly([
-          'featuredLinkLabel', 'featuredLinkUrl', 'featuredLinkImageUrl', 'updatedBy', 'updatedAt'
+          'featuredLinkLabel', 'featuredLinkUrl', 'featuredLinkImageUrl',
+          'contactHeadline', 'contactSubtitle', 'contactWhatsapp', 'contactEmail',
+          'contactTelegram', 'contactSchedule', 'paymentPagoMovil', 'paymentZelle',
+          'paymentBinance', 'paymentNotes',
+          'updatedBy', 'updatedAt'
         ]);
 
       allow delete: if false;

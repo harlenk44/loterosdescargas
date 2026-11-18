@@ -10,6 +10,8 @@ import {
   Pin,
   Star,
   Image as ImageIcon,
+  Megaphone,
+  MessageCircle,
   Pencil,
 } from 'lucide-react';
 import {
@@ -24,6 +26,7 @@ import {
   type ProgramPlatform,
   type ProgramRecord,
   type ProgramVersionRecord,
+  type PromotionRecord,
 } from '../types/repository';
 import {
   createComment,
@@ -42,6 +45,7 @@ import {
 import { formatBytes, formatTimestamp } from '../lib/format';
 import { getDefaultMediaForProgram } from '../lib/programMedia';
 import { ProgramUploadForm } from './ProgramUploadForm';
+import { InlinePromotionSlot } from './PromotionSlot';
 
 interface ProgramDetailViewProps {
   program: ProgramRecord;
@@ -49,6 +53,11 @@ interface ProgramDetailViewProps {
   isStarterOnly?: boolean;
   starterVersion?: ProgramVersionRecord | null;
   onImportStarter?: () => Promise<void>;
+  promotions?: PromotionRecord[];
+  brokenPromoImages?: Record<string, boolean>;
+  onPromoImageError?: (id: string) => void;
+  onOpenContact?: (programName?: string) => void;
+  onManageDetailAds?: () => void;
   user: User | null;
   isAdmin: boolean;
   onBack: () => void;
@@ -72,6 +81,11 @@ export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
   isStarterOnly = false,
   starterVersion = null,
   onImportStarter,
+  promotions = [],
+  brokenPromoImages = {},
+  onPromoImageError = () => {},
+  onOpenContact,
+  onManageDetailAds,
   user,
   isAdmin,
   onBack,
@@ -684,6 +698,16 @@ export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
         </div>
       </section>
 
+      <InlinePromotionSlot
+        promotions={promotions}
+        position="detalle_arriba"
+        brokenImages={brokenPromoImages}
+        onImageError={onPromoImageError}
+        onInternalAction={(target) => {
+          if (target === '#contacto') onOpenContact?.(program.name);
+        }}
+      />
+
       {activeTab === 'resumen' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 bg-white/95 backdrop-blur-md text-[#0B1E3D] border border-[#00A3FF]/35 rounded-2xl p-6 space-y-6 shadow-lg">
@@ -1005,6 +1029,51 @@ export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      <InlinePromotionSlot
+        promotions={promotions}
+        position="detalle_abajo"
+        brokenImages={brokenPromoImages}
+        onImageError={onPromoImageError}
+        onInternalAction={(target) => {
+          if (target === '#contacto') onOpenContact?.(program.name);
+        }}
+      />
+
+      {(onOpenContact || (isAdmin && onManageDetailAds)) && (
+        <section className="rounded-2xl bg-[#041B47]/85 backdrop-blur-md border border-[#00A3FF]/35 px-6 py-5 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-sm sm:text-base font-bold text-white">
+              ¿Necesitas soporte, licencia o quieres anunciar aquí?
+            </p>
+            <p className="text-xs sm:text-sm text-blue-100/80">
+              Accede a nuestra página de contacto directo, tarifas de publicidad y métodos de pago.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            {isAdmin && onManageDetailAds && (
+              <button
+                type="button"
+                onClick={onManageDetailAds}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold text-[#041E00] bg-[#7FE000] hover:bg-[#91F20F] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Megaphone className="w-3.5 h-3.5" />
+                Agregar Publicidad Aquí
+              </button>
+            )}
+            {onOpenContact && (
+              <button
+                type="button"
+                onClick={() => onOpenContact(program.name)}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white bg-[#0052CC] hover:bg-[#0066FF] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <MessageCircle className="w-4 h-4" />
+                Contacto y Pago
+              </button>
+            )}
+          </div>
+        </section>
       )}
     </div>
   );
