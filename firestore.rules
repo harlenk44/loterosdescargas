@@ -43,6 +43,7 @@ service cloud.firestore {
         ]) &&
         data.keys().hasOnly([
           'id', 'slug', 'name', 'summary', 'description', 'category', 'platform',
+          'programGroup', 'sortOrder',
           'iconUrl', 'imageUrl',
           'latestVersion', 'latestChannel', 'downloadCount', 'commentCount',
           'autoUpdateEnabled', 'status', 'ownerId', 'ownerName', 'createdAt', 'updatedAt'
@@ -54,6 +55,8 @@ service cloud.firestore {
         data.description is string && data.description.size() >= 10 && data.description.size() <= 4000 &&
         data.category in ['Programas de Venta', 'Punto de Venta', 'Impresión Térmica', 'Utilidades y Drivers'] &&
         data.platform in ['Windows', 'Android', 'Utilidades', 'Impresión'] &&
+        (!('programGroup' in data) || (data.programGroup is string && data.programGroup.size() <= 60)) &&
+        (!('sortOrder' in data) || (data.sortOrder is int && data.sortOrder >= 0 && data.sortOrder <= 100000)) &&
         data.iconUrl is string && data.iconUrl.size() <= 350000 &&
         data.imageUrl is string && data.imageUrl.size() <= 350000 &&
         data.latestVersion is string && data.latestVersion.size() >= 1 && data.latestVersion.size() <= 32 &&
@@ -199,6 +202,7 @@ service cloud.firestore {
             isAdmin() &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'slug', 'name', 'summary', 'description', 'category', 'platform',
+              'programGroup', 'sortOrder',
               'iconUrl', 'imageUrl',
               'latestVersion', 'latestChannel', 'downloadCount', 'commentCount',
               'autoUpdateEnabled', 'status', 'ownerName', 'updatedAt'

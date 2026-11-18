@@ -1,22 +1,10 @@
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  onSnapshot,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  where,
-  writeBatch,
-  type Unsubscribe,
-} from 'firebase/firestore';
+import { Timestamp, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch, type Unsubscribe } from 'firebase/firestore';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import {
   BOOTSTRAPPED_ADMIN_EMAIL,
   DEFAULT_FEATURED_LINK,
+  DEFAULT_PROGRAM_GROUPS,
   SCHEMA_LIMITS,
   SCHEMA_PATTERNS,
   type AutoUpdateCheckResponse,
@@ -39,6 +27,28 @@ import {
 } from '../types/repository';
 import { compareSemverDesc, makeSafeId, slugifyProgramName } from './format';
 
+export function normalizeProgramGroup(
+  raw: string | undefined | null,
+  knownGroups: readonly string[] = []
+): string {
+  const cleaned = (raw ?? '').trim().replace(/\s+/g, ' ').slice(0, SCHEMA_LIMITS.PROGRAM_GROUP_MAX);
+  if (!cleaned) return '';
+  const lower = cleaned.toLowerCase();
+  for (const existing of [...knownGroups, ...DEFAULT_PROGRAM_GROUPS]) {
+    if (existing.trim().toLowerCase() === lower) {
+      return existing.trim();
+    }
+  }
+  return cleaned;
+}
+
+export function normalizeSortOrder(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) return undefined;
+  return Math.min(SCHEMA_LIMITS.SORT_ORDER_MAX, Math.max(0, Math.round(num)));
+}
+
 export async function checkAdminStatus(
   _uid: string,
   email: string | null,
@@ -47,25 +57,155 @@ export async function checkAdminStatus(
   return Boolean(emailVerified && email === BOOTSTRAPPED_ADMIN_EMAIL);
 }
 
+type FirestoreRestField = {
+  stringValue?: string;
+  integerValue?: string;
+  doubleValue?: number;
+  booleanValue?: boolean;
+  timestampValue?: string;
+};
+
+function decodeRestField(val: FirestoreRestField | undefined): unknown {
+  if (!val) return undefined;
+  if (val.stringValue !== undefined) return val.stringValue;
+  if (val.integerValue !== undefined) return parseInt(val.integerValue, 10);
+  if (val.doubleValue !== undefined) return val.doubleValue;
+  if (val.booleanValue !== undefined) return val.booleanValue;
+  if (val.timestampValue !== undefined) {
+    const ms = Date.parse(val.timestampValue);
+    return Number.isFinite(ms) ? Timestamp.fromMillis(ms) : null;
+  }
+  return undefined;
+}
+
+async function runFirestoreRestQuery<T>(structuredQuery: Record<string, unknown>): Promise<T[]> {
+  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(firebaseConfig.projectId)}/databases/${encodeURIComponent(firebaseConfig.firestoreDatabaseId)}/documents:runQuery?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
+  const token = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => '') : '';
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ structuredQuery }),
+  });
+  if (!res.ok) {
+    throw new Error(`REST query failed (${res.status})`);
+  }
+  const rows = (await res.json()) as Array<{
+    document?: { name?: string; fields?: Record<string, FirestoreRestField> };
+  }>;
+  const results: T[] = [];
+  for (const row of rows) {
+    if (!row.document?.fields) continue;
+    const obj: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(row.document.fields)) {
+      obj[k] = decodeRestField(v);
+    }
+    if (!obj.id && row.document.name) {
+      obj.id = row.document.name.split('/').pop();
+    }
+    results.push(obj as T);
+  }
+  return results;
+}
+
+function sanitizeProgramRecord(raw: Partial<ProgramRecord> & { id?: string }, fallbackId = ''): ProgramRecord {
+  const safeId = typeof raw.id === 'string' && raw.id ? raw.id : fallbackId || 'prog_unknown';
+  const safeName = typeof raw.name === 'string' && raw.name.trim() ? raw.name : 'Programa';
+  const safeSlug =
+    typeof raw.slug === 'string' && raw.slug.trim()
+      ? raw.slug
+      : slugifyProgramName(safeName) || safeId;
+  return {
+    id: safeId,
+    slug: safeSlug,
+    name: safeName,
+    summary: typeof raw.summary === 'string' ? raw.summary : '',
+    description: typeof raw.description === 'string' ? raw.description : '',
+    category: (typeof raw.category === 'string' && raw.category ? raw.category : 'Banca Comercial') as ProgramCategory,
+    platform: (typeof raw.platform === 'string' && raw.platform ? raw.platform : 'Windows') as ProgramPlatform,
+    ...(typeof raw.programGroup === 'string' && raw.programGroup.trim()
+      ? { programGroup: raw.programGroup.trim() }
+      : {}),
+    ...(typeof raw.sortOrder === 'number' && Number.isFinite(raw.sortOrder)
+      ? { sortOrder: raw.sortOrder }
+      : {}),
+    iconUrl: typeof raw.iconUrl === 'string' ? raw.iconUrl : '',
+    imageUrl: typeof raw.imageUrl === 'string' ? raw.imageUrl : '',
+    latestVersion: typeof raw.latestVersion === 'string' && raw.latestVersion ? raw.latestVersion : '1.0.0',
+    latestChannel: (typeof raw.latestChannel === 'string' && raw.latestChannel ? raw.latestChannel : 'Estable') as ReleaseChannel,
+    downloadCount: typeof raw.downloadCount === 'number' && Number.isFinite(raw.downloadCount) ? raw.downloadCount : 0,
+    commentCount: typeof raw.commentCount === 'number' && Number.isFinite(raw.commentCount) ? raw.commentCount : 0,
+    autoUpdateEnabled: Boolean(raw.autoUpdateEnabled),
+    status: (typeof raw.status === 'string' && raw.status ? raw.status : 'Activo') as ProgramStatus,
+    ownerId: typeof raw.ownerId === 'string' ? raw.ownerId : '',
+    ownerName: typeof raw.ownerName === 'string' ? raw.ownerName : 'LOTEROSDESCARGAS',
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+  };
+}
+
 export function subscribePrograms(
   onData: (programs: ProgramRecord[]) => void,
   onError?: (err: Error) => void
 ): Unsubscribe {
   const path = 'programs';
   const q = query(collection(db, path), where('status', 'in', ['Activo', 'Archivado']));
-  return onSnapshot(
+  let settledFromSnapshot = false;
+  let cancelled = false;
+
+  const sortPrograms = (items: ProgramRecord[]) => {
+    items.sort((a, b) => {
+      const sa = typeof a.sortOrder === 'number' ? a.sortOrder : Number.MAX_SAFE_INTEGER;
+      const sb = typeof b.sortOrder === 'number' ? b.sortOrder : Number.MAX_SAFE_INTEGER;
+      if (sa !== sb) return sa - sb;
+      const ta = a.createdAt?.toMillis?.() ?? a.updatedAt?.toMillis?.() ?? 0;
+      const tb = b.createdAt?.toMillis?.() ?? b.updatedAt?.toMillis?.() ?? 0;
+      if (tb !== ta) return tb - ta;
+      return a.id.localeCompare(b.id);
+    });
+    return items;
+  };
+
+  const fallbackTimer = setTimeout(() => {
+    if (settledFromSnapshot || cancelled) return;
+    void runFirestoreRestQuery<ProgramRecord>({
+      from: [{ collectionId: 'programs' }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'status' },
+          op: 'IN',
+          value: {
+            arrayValue: {
+              values: [{ stringValue: 'Activo' }, { stringValue: 'Archivado' }],
+            },
+          },
+        },
+      },
+    })
+      .then((items) => {
+        if (!settledFromSnapshot && !cancelled) {
+          onData(sortPrograms(items.map((item) => sanitizeProgramRecord(item))));
+        }
+      })
+      .catch(() => {
+        // Snapshot listener remains active and handles retries/errors
+      });
+  }, 7000);
+
+  const unsub = onSnapshot(
     q,
     (snapshot) => {
-      const items = snapshot.docs.map((d) => d.data() as ProgramRecord);
-      items.sort((a, b) => {
-        const ta = a.createdAt?.toMillis?.() ?? a.updatedAt?.toMillis?.() ?? 0;
-        const tb = b.createdAt?.toMillis?.() ?? b.updatedAt?.toMillis?.() ?? 0;
-        if (tb !== ta) return tb - ta;
-        return a.id.localeCompare(b.id);
-      });
-      onData(items);
+      settledFromSnapshot = true;
+      clearTimeout(fallbackTimer);
+      const items = snapshot.docs.map((d) =>
+        sanitizeProgramRecord(d.data() as Partial<ProgramRecord>, d.id)
+      );
+      onData(sortPrograms(items));
     },
     (error) => {
+      clearTimeout(fallbackTimer);
       try {
         handleFirestoreError(error, OperationType.LIST, path);
       } catch (wrapped) {
@@ -73,6 +213,46 @@ export function subscribePrograms(
       }
     }
   );
+
+  return () => {
+    cancelled = true;
+    clearTimeout(fallbackTimer);
+    unsub();
+  };
+}
+
+function sortProgramVersions(items: ProgramVersionRecord[]): ProgramVersionRecord[] {
+  items.sort((a, b) => {
+    if (a.isLatest !== b.isLatest) return a.isLatest ? -1 : 1;
+    return compareSemverDesc(a.version || '0.0.0', b.version || '0.0.0');
+  });
+  return items;
+}
+
+export async function fetchProgramVersionsOnce(programId: string): Promise<ProgramVersionRecord[]> {
+  const path = `programs/${programId}/versions`;
+  const q = query(collection(db, path), where('programId', '==', programId));
+  try {
+    const snap = await getDocs(q);
+    const items = snap.docs.map((d) => d.data() as ProgramVersionRecord);
+    return sortProgramVersions(items);
+  } catch {
+    try {
+      const items = await runFirestoreRestQuery<ProgramVersionRecord>({
+        from: [{ collectionId: 'versions' }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'programId' },
+            op: 'EQUAL',
+            value: { stringValue: programId },
+          },
+        },
+      });
+      return sortProgramVersions(items);
+    } catch {
+      return [];
+    }
+  }
 }
 
 export function subscribeProgramVersions(
@@ -86,11 +266,7 @@ export function subscribeProgramVersions(
     q,
     (snapshot) => {
       const items = snapshot.docs.map((d) => d.data() as ProgramVersionRecord);
-      items.sort((a, b) => {
-        if (a.isLatest !== b.isLatest) return a.isLatest ? -1 : 1;
-        return compareSemverDesc(a.version, b.version);
-      });
-      onData(items);
+      onData(sortProgramVersions(items));
     },
     (error) => {
       try {
@@ -517,6 +693,8 @@ export interface CreateProgramInput {
   description: string;
   category: ProgramCategory;
   platform: ProgramPlatform;
+  programGroup?: string;
+  sortOrder?: number;
   iconUrl: string;
   imageUrl: string;
   autoUpdateEnabled: boolean;
@@ -563,6 +741,8 @@ export async function createProgramWithInitialVersion(input: CreateProgramInput)
     0,
     SCHEMA_LIMITS.OWNER_NAME_MAX
   );
+  const cleanGroup = normalizeProgramGroup(input.programGroup);
+  const cleanSortOrder = normalizeSortOrder(input.sortOrder);
 
   batch.set(programRef, {
     id: programId,
@@ -572,6 +752,8 @@ export async function createProgramWithInitialVersion(input: CreateProgramInput)
     description: input.description.trim().slice(0, SCHEMA_LIMITS.DESCRIPTION_MAX),
     category: input.category,
     platform: input.platform,
+    ...(cleanGroup ? { programGroup: cleanGroup } : {}),
+    ...(cleanSortOrder !== undefined ? { sortOrder: cleanSortOrder } : {}),
     iconUrl: input.iconUrl.trim().slice(0, SCHEMA_LIMITS.MEDIA_URL_MAX),
     imageUrl: input.imageUrl.trim().slice(0, SCHEMA_LIMITS.MEDIA_URL_MAX),
     latestVersion: input.initialVersion.version.trim().slice(0, SCHEMA_LIMITS.VERSION_MAX),
@@ -754,18 +936,63 @@ export async function updateProgramSettings(
   patch: Partial<
     Pick<
       ProgramRecord,
-      'name' | 'summary' | 'description' | 'category' | 'platform' | 'iconUrl' | 'imageUrl' | 'autoUpdateEnabled' | 'status'
+      | 'name'
+      | 'summary'
+      | 'description'
+      | 'category'
+      | 'platform'
+      | 'programGroup'
+      | 'sortOrder'
+      | 'iconUrl'
+      | 'imageUrl'
+      | 'autoUpdateEnabled'
+      | 'status'
     >
   >
 ): Promise<void> {
   const path = `programs/${programId}`;
+  const cleanPatch: Record<string, unknown> = { ...patch };
+  if (patch.programGroup !== undefined) {
+    cleanPatch.programGroup = normalizeProgramGroup(patch.programGroup);
+  }
+  if (patch.sortOrder !== undefined) {
+    const cleanOrder = normalizeSortOrder(patch.sortOrder);
+    if (cleanOrder !== undefined) {
+      cleanPatch.sortOrder = cleanOrder;
+    } else {
+      delete cleanPatch.sortOrder;
+    }
+  }
   try {
     await updateDoc(doc(db, 'programs', programId), {
-      ...patch,
+      ...cleanPatch,
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function batchUpdateProgramOrder(
+  updates: Array<{ id: string; sortOrder: number; programGroup?: string }>
+): Promise<void> {
+  if (updates.length === 0) return;
+  const batch = writeBatch(db);
+  for (const item of updates) {
+    const cleanOrder = normalizeSortOrder(item.sortOrder) ?? 0;
+    const payload: Record<string, unknown> = {
+      sortOrder: cleanOrder,
+      updatedAt: serverTimestamp(),
+    };
+    if (item.programGroup !== undefined) {
+      payload.programGroup = normalizeProgramGroup(item.programGroup);
+    }
+    batch.update(doc(db, 'programs', item.id), payload);
+  }
+  try {
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'programs');
   }
 }
 
@@ -1063,6 +1290,8 @@ export function subscribePromotions(
   const path = 'promotions';
   let activeItems: PromotionRecord[] = [];
   let pausedItems: PromotionRecord[] = [];
+  let settledActiveSnapshot = false;
+  let cancelled = false;
 
   const emitMerged = () => {
     const byId = new Map<string, PromotionRecord>();
@@ -1082,14 +1311,40 @@ export function subscribePromotions(
     onData(merged);
   };
 
+  const activeFallbackTimer = setTimeout(() => {
+    if (settledActiveSnapshot || cancelled) return;
+    void runFirestoreRestQuery<PromotionRecord>({
+      from: [{ collectionId: 'promotions' }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'status' },
+          op: 'EQUAL',
+          value: { stringValue: 'Activo' },
+        },
+      },
+    })
+      .then((items) => {
+        if (!settledActiveSnapshot && !cancelled) {
+          activeItems = items;
+          emitMerged();
+        }
+      })
+      .catch(() => {
+        // Snapshot listener remains active
+      });
+  }, 3500);
+
   const activeQuery = query(collection(db, path), where('status', '==', 'Activo'));
   const unsubActive = onSnapshot(
     activeQuery,
     (snapshot) => {
+      settledActiveSnapshot = true;
+      clearTimeout(activeFallbackTimer);
       activeItems = snapshot.docs.map((d) => d.data() as PromotionRecord);
       emitMerged();
     },
     (error) => {
+      clearTimeout(activeFallbackTimer);
       try {
         handleFirestoreError(error, OperationType.LIST, path);
       } catch (wrapped) {
@@ -1099,7 +1354,11 @@ export function subscribePromotions(
   );
 
   if (!includePaused) {
-    return unsubActive;
+    return () => {
+      cancelled = true;
+      clearTimeout(activeFallbackTimer);
+      unsubActive();
+    };
   }
 
   const pausedQuery = query(collection(db, path), where('status', '==', 'Pausado'));
@@ -1119,6 +1378,8 @@ export function subscribePromotions(
   );
 
   return () => {
+    cancelled = true;
+    clearTimeout(activeFallbackTimer);
     unsubActive();
     unsubPaused();
   };

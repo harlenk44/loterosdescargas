@@ -73,6 +73,16 @@
           "enum": ["Windows", "Android", "Utilidades", "Impresión"],
           "description": "Target operating system or section."
         },
+        "programGroup": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 60,
+          "description": "Optional program suite or family name (e.g. Maxplay, Premier, Patronus) for grouping related downloads."
+        },
+        "sortOrder": {
+          "type": "integer",
+          "description": "Optional manual ordering index (0-100000) within the group or catalog."
+        },
         "iconUrl": {
           "type": "string",
           "minLength": 0,

@@ -11,6 +11,8 @@ export const PROGRAM_PLATFORMS = [
   'Impresión',
 ] as const;
 
+export const DEFAULT_PROGRAM_GROUPS = ['Maxplay', 'Premier', 'Patronus'] as const;
+
 export const RELEASE_CHANNELS = ['Estable', 'Beta', 'Parche Crítico'] as const;
 
 export const COMMENT_CATEGORIES = [
@@ -58,6 +60,8 @@ export const SCHEMA_LIMITS = {
   SUMMARY_MAX: 240,
   DESCRIPTION_MIN: 10,
   DESCRIPTION_MAX: 4000,
+  PROGRAM_GROUP_MAX: 60,
+  SORT_ORDER_MAX: 100000,
   MEDIA_URL_MAX: 350000,
   VERSION_MAX: 32,
   FILENAME_MAX: 180,
@@ -93,6 +97,8 @@ export interface ProgramRecord {
   description: string;
   category: ProgramCategory;
   platform: ProgramPlatform;
+  programGroup?: string;
+  sortOrder?: number;
   iconUrl: string;
   imageUrl: string;
   latestVersion: string;

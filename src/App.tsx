@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
+  ChevronLeft,
+  ChevronRight,
   Download,
   FolderArchive,
   Image as ImageIcon,
+  Layers,
+  LayoutGrid,
   Lock,
   Megaphone,
   PackagePlus,
@@ -13,19 +17,23 @@ import {
 } from 'lucide-react';
 import { auth, googleProvider } from './lib/firebase';
 import {
+  batchUpdateProgramOrder,
   checkAdminStatus,
   createProgramWithInitialVersion,
   deleteProgramAndSubcollections,
+  fetchProgramVersionsOnce,
   fetchStarterCatalog,
+  normalizeProgramGroup,
   recordProgramDownload,
   subscribePrograms,
-  subscribeProgramVersions,
   subscribePromotions,
   updateProgramSettings,
   uploadMediaImage,
 } from './lib/repositoryApi';
 import {
+  DEFAULT_PROGRAM_GROUPS,
   PROGRAM_PLATFORMS,
+  SCHEMA_LIMITS,
   type ProgramPlatform,
   type ProgramRecord,
   type ProgramVersionRecord,
@@ -67,6 +75,8 @@ export default function App() {
   // Filters & Quick Owner Controls
   const [searchQuery, setSearchQuery] = useState('');
   const [platformFilter, setPlatformFilter] = useState<string>('Todas');
+  const [groupFilter, setGroupFilter] = useState<string>('Todos');
+  const [viewLayout, setViewLayout] = useState<'agrupado' | 'cuadricula'>('agrupado');
   const [hideStarter, setHideStarter] = useState<boolean>(() => {
     try {
       return localStorage.getItem('loteros_hide_starter') === '1';
@@ -82,6 +92,12 @@ export default function App() {
   const [dismissedPromoIds, setDismissedPromoIds] = useState<Record<string, boolean>>({});
   const [updatingPlatformId, setUpdatingPlatformId] = useState<string | null>(null);
   const [optimisticPlatforms, setOptimisticPlatforms] = useState<Record<string, ProgramPlatform>>({});
+  const [updatingGroupId, setUpdatingGroupId] = useState<string | null>(null);
+  const [optimisticGroups, setOptimisticGroups] = useState<Record<string, string>>({});
+  const [reorderingId, setReorderingId] = useState<string | null>(null);
+  const [optimisticSortOrders, setOptimisticSortOrders] = useState<Record<string, number>>({});
+  const [customGroupTargetId, setCustomGroupTargetId] = useState<string | null>(null);
+  const [customGroupDraft, setCustomGroupDraft] = useState('');
   const [downloadFeedback, setDownloadFeedback] = useState<string | null>(null);
 
   // Version cache per program for direct square-image downloads
@@ -151,17 +167,33 @@ export default function App() {
     return () => unsubPromos();
   }, [isAdmin, authLoading]);
 
+  const programIdsKey = useMemo(
+    () =>
+      programs
+        .map((p) => p.id)
+        .sort()
+        .join(','),
+    [programs]
+  );
+
   useEffect(() => {
-    if (programs.length === 0) return;
-    const unsubs = programs.map((prog) =>
-      subscribeProgramVersions(prog.id, (vers) => {
-        setVersionsByProgram((prev) => ({ ...prev, [prog.id]: vers }));
-      })
-    );
+    if (!programIdsKey) return;
+    let cancelled = false;
+    const ids = programIdsKey.split(',').filter(Boolean);
+    void (async () => {
+      for (const progId of ids) {
+        if (cancelled) break;
+        const vers = await fetchProgramVersionsOnce(progId);
+        if (cancelled) break;
+        if (vers.length > 0) {
+          setVersionsByProgram((prev) => ({ ...prev, [progId]: vers }));
+        }
+      }
+    })();
     return () => {
-      unsubs.forEach((fn) => fn());
+      cancelled = true;
     };
-  }, [programs]);
+  }, [programIdsKey]);
 
   const handleSignIn = async () => {
     if (signingIn) return;
@@ -260,35 +292,165 @@ export default function App() {
     !programsLoading && programs.length === 0 && starterCatalogView.length > 0 && !hideStarter;
 
   const displayPrograms = useMemo(() => {
-    if (showingStarterFallback) {
-      return starterCatalogView.map((s) => s.program);
+    const base = showingStarterFallback ? starterCatalogView.map((s) => s.program) : programs;
+    const merged = base.map((p) => {
+      const nextPlat = optimisticPlatforms[p.id] ?? p.platform;
+      const nextGroup =
+        p.id in optimisticGroups ? optimisticGroups[p.id] : p.programGroup ?? '';
+      const nextOrder =
+        p.id in optimisticSortOrders ? optimisticSortOrders[p.id] : p.sortOrder;
+      return {
+        ...p,
+        platform: nextPlat,
+        programGroup: nextGroup,
+        ...(nextOrder !== undefined ? { sortOrder: nextOrder } : {}),
+      };
+    });
+    merged.sort((a, b) => {
+      const sa = typeof a.sortOrder === 'number' ? a.sortOrder : Number.MAX_SAFE_INTEGER;
+      const sb = typeof b.sortOrder === 'number' ? b.sortOrder : Number.MAX_SAFE_INTEGER;
+      if (sa !== sb) return sa - sb;
+      const ta = a.createdAt?.toMillis?.() ?? a.updatedAt?.toMillis?.() ?? 0;
+      const tb = b.createdAt?.toMillis?.() ?? b.updatedAt?.toMillis?.() ?? 0;
+      if (tb !== ta) return tb - ta;
+      return a.id.localeCompare(b.id);
+    });
+    return merged;
+  }, [
+    showingStarterFallback,
+    starterCatalogView,
+    programs,
+    optimisticPlatforms,
+    optimisticGroups,
+    optimisticSortOrders,
+  ]);
+
+  const existingProgramGroups = useMemo(() => {
+    const minOrderByGroup = new Map<string, number>();
+    for (const p of displayPrograms) {
+      const grp = (p.programGroup ?? '').trim();
+      if (!grp) continue;
+      const ord = typeof p.sortOrder === 'number' ? p.sortOrder : Number.MAX_SAFE_INTEGER;
+      const prev = minOrderByGroup.get(grp);
+      if (prev === undefined || ord < prev) {
+        minOrderByGroup.set(grp, ord);
+      }
     }
-    return programs;
-  }, [showingStarterFallback, starterCatalogView, programs]);
+    return Array.from(minOrderByGroup.entries())
+      .sort((a, b) => {
+        if (a[1] !== b[1]) return a[1] - b[1];
+        return a[0].localeCompare(b[0], 'es');
+      })
+      .map(([name]) => name);
+  }, [displayPrograms]);
+
+  const allAssignableGroups = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const g of [...DEFAULT_PROGRAM_GROUPS, ...existingProgramGroups]) {
+      const trimmed = g.trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push(trimmed);
+      }
+    }
+    return list;
+  }, [existingProgramGroups]);
+
+  useEffect(() => {
+    if (
+      !programsLoading &&
+      groupFilter !== 'Todos' &&
+      groupFilter !== '__ungrouped__' &&
+      !existingProgramGroups.includes(groupFilter)
+    ) {
+      setGroupFilter('Todos');
+    }
+  }, [programsLoading, groupFilter, existingProgramGroups]);
 
   const platformCounts = useMemo(() => {
     const counts: Record<string, number> = { Todas: displayPrograms.length };
     for (const plat of PROGRAM_PLATFORMS) counts[plat] = 0;
     for (const p of displayPrograms) {
-      const effectivePlat = optimisticPlatforms[p.id] ?? p.platform;
-      counts[effectivePlat] = (counts[effectivePlat] ?? 0) + 1;
+      counts[p.platform] = (counts[p.platform] ?? 0) + 1;
     }
     return counts;
-  }, [displayPrograms, optimisticPlatforms]);
+  }, [displayPrograms]);
+
+  const groupCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      Todos: displayPrograms.length,
+      __ungrouped__: 0,
+    };
+    for (const p of displayPrograms) {
+      const grp = (p.programGroup ?? '').trim();
+      if (!grp) {
+        counts.__ungrouped__ += 1;
+      } else {
+        counts[grp] = (counts[grp] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [displayPrograms]);
 
   const filteredPrograms = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return displayPrograms.filter((p) => {
-      const effectivePlat = optimisticPlatforms[p.id] ?? p.platform;
-      if (platformFilter !== 'Todas' && effectivePlat !== platformFilter) return false;
+      if (platformFilter !== 'Todas' && p.platform !== platformFilter) return false;
+      const grp = (p.programGroup ?? '').trim();
+      if (groupFilter === '__ungrouped__') {
+        if (grp) return false;
+      } else if (groupFilter !== 'Todos' && grp !== groupFilter) {
+        return false;
+      }
       if (!q) return true;
       return (
         p.name.toLowerCase().includes(q) ||
         p.slug.toLowerCase().includes(q) ||
-        p.summary.toLowerCase().includes(q)
+        p.summary.toLowerCase().includes(q) ||
+        grp.toLowerCase().includes(q)
       );
     });
-  }, [displayPrograms, searchQuery, platformFilter, optimisticPlatforms]);
+  }, [displayPrograms, searchQuery, platformFilter, groupFilter]);
+
+  const groupedSections = useMemo(() => {
+    const map = new Map<string, ProgramRecord[]>();
+    for (const p of filteredPrograms) {
+      const key = (p.programGroup ?? '').trim();
+      const bucket = map.get(key);
+      if (bucket) {
+        bucket.push(p);
+      } else {
+        map.set(key, [p]);
+      }
+    }
+    const entries = Array.from(map.entries()).map(([key, items]) => {
+      let minOrder = Number.MAX_SAFE_INTEGER;
+      for (const item of items) {
+        if (typeof item.sortOrder === 'number' && item.sortOrder < minOrder) {
+          minOrder = item.sortOrder;
+        }
+      }
+      return {
+        key,
+        label: key || 'Otros programas',
+        minOrder,
+        items,
+      };
+    });
+    entries.sort((a, b) => {
+      if (a.key === '' && b.key !== '') return 1;
+      if (b.key === '' && a.key !== '') return -1;
+      if (a.minOrder !== b.minOrder) return a.minOrder - b.minOrder;
+      return a.label.localeCompare(b.label, 'es');
+    });
+    return entries;
+  }, [filteredPrograms]);
+
+  const shouldRenderGrouped =
+    viewLayout === 'agrupado' && existingProgramGroups.length > 0 && groupFilter === 'Todos';
 
   const activePromotions = useMemo(
     () => promotions.filter((p) => p.status === 'Activo'),
@@ -356,7 +518,14 @@ export default function App() {
   };
 
   const handleDirectDownload = async (prog: ProgramRecord) => {
-    const latest = getLatestVersionForProgram(prog.id);
+    let latest = getLatestVersionForProgram(prog.id);
+    if (!latest && !showingStarterFallback) {
+      const vers = await fetchProgramVersionsOnce(prog.id);
+      if (vers.length > 0) {
+        setVersionsByProgram((prev) => ({ ...prev, [prog.id]: vers }));
+        latest = vers.find((v) => v.isLatest && !v.revoked) || vers.find((v) => !v.revoked) || null;
+      }
+    }
     if (!latest) {
       setSelectedProgramId(prog.id);
       return;
@@ -391,7 +560,7 @@ export default function App() {
       const mediaUrl = await uploadMediaImage(file, 'cover');
       await updateProgramSettings(prog.id, {
         imageUrl: mediaUrl,
-        iconUrl: mediaUrl,
+        iconUrl: '',
       });
       setBrokenImageIds((prev) => {
         const next = { ...prev };
@@ -436,12 +605,92 @@ export default function App() {
     }
   };
 
+  const handleCardGroupChange = async (prog: ProgramRecord, rawGroup: string) => {
+    if (!isAdmin || showingStarterFallback) return;
+    const nextGroup = normalizeProgramGroup(rawGroup, allAssignableGroups);
+    const currentGroup = (prog.programGroup ?? '').trim();
+    if (currentGroup === nextGroup) {
+      setCustomGroupTargetId(null);
+      setCustomGroupDraft('');
+      return;
+    }
+    setUpdatingGroupId(prog.id);
+    setOptimisticGroups((prev) => ({ ...prev, [prog.id]: nextGroup }));
+    setCustomGroupTargetId(null);
+    setCustomGroupDraft('');
+    setDataError(null);
+    try {
+      await updateProgramSettings(prog.id, { programGroup: nextGroup });
+      setDownloadFeedback(
+        nextGroup
+          ? `"${prog.name}" agrupado en ${nextGroup}.`
+          : `"${prog.name}" movido a Otros programas.`
+      );
+      setTimeout(() => {
+        setDownloadFeedback((prev) => (prev?.includes(prog.name) ? null : prev));
+      }, 3000);
+    } catch (err) {
+      setDataError(
+        err instanceof Error ? err.message : 'No se pudo cambiar el grupo del programa.'
+      );
+    } finally {
+      setOptimisticGroups((prev) => {
+        const next = { ...prev };
+        delete next[prog.id];
+        return next;
+      });
+      setUpdatingGroupId(null);
+    }
+  };
+
+  const handleCardMoveInGroup = async (
+    prog: ProgramRecord,
+    direction: -1 | 1,
+    siblings: ProgramRecord[]
+  ) => {
+    if (!isAdmin || showingStarterFallback || reorderingId) return;
+    const currentIndex = siblings.findIndex((item) => item.id === prog.id);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= siblings.length) return;
+
+    const reordered = [...siblings];
+    const [moved] = reordered.splice(currentIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+
+    const updates = reordered.map((item, idx) => ({
+      id: item.id,
+      sortOrder: (idx + 1) * 10,
+    }));
+
+    setReorderingId(prog.id);
+    setOptimisticSortOrders((prev) => {
+      const next = { ...prev };
+      for (const u of updates) next[u.id] = u.sortOrder;
+      return next;
+    });
+    setDataError(null);
+    try {
+      await batchUpdateProgramOrder(updates);
+    } catch (err) {
+      setDataError(
+        err instanceof Error ? err.message : 'No se pudo guardar el nuevo orden.'
+      );
+    } finally {
+      setOptimisticSortOrders((prev) => {
+        const next = { ...prev };
+        for (const u of updates) delete next[u.id];
+        return next;
+      });
+      setReorderingId(null);
+    }
+  };
+
   const handleCardDelete = async (prog: ProgramRecord) => {
     if (!isAdmin || showingStarterFallback) return;
     setDeletingId(prog.id);
     setDataError(null);
     try {
-      await deleteProgramAndSubcollections(prog.id, prog.slug);
+      await deleteProgramAndSubcollections(prog.id, programSlugSafe(prog));
       setConfirmDeleteId(null);
     } catch (err) {
       setDataError(err instanceof Error ? err.message : 'No se pudo eliminar el programa.');
@@ -449,6 +698,10 @@ export default function App() {
       setDeletingId(null);
     }
   };
+
+  function programSlugSafe(prog: ProgramRecord): string {
+    return prog.slug;
+  }
 
   const handleToggleStarterVisibility = (hide: boolean) => {
     setHideStarter(hide);
@@ -597,6 +850,7 @@ export default function App() {
         {selectedProgram ? (
           <ProgramDetailView
             program={selectedProgram}
+            availableGroups={allAssignableGroups}
             isStarterOnly={showingStarterFallback}
             starterVersion={selectedStarterVersion}
             onImportStarter={
@@ -751,6 +1005,84 @@ export default function App() {
                 })}
               </div>
 
+              {/* Program / Family Filter & Grouping Mode Bar */}
+              {existingProgramGroups.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-blue-200/65 mr-1 whitespace-nowrap shrink-0">
+                      Programas:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setGroupFilter('Todos')}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                        groupFilter === 'Todos'
+                          ? 'bg-[#7FE000] border-[#7FE000] text-[#041E00]'
+                          : 'bg-[#041B47]/75 border-[#00A3FF]/30 text-blue-100 hover:text-white hover:border-[#00A3FF]'
+                      }`}
+                    >
+                      Todos ({groupCounts.Todos ?? 0})
+                    </button>
+                    {existingProgramGroups.map((grp) => (
+                      <button
+                        key={grp}
+                        type="button"
+                        onClick={() => setGroupFilter(grp)}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer tabular-nums ${
+                          groupFilter === grp
+                            ? 'bg-[#7FE000] border-[#7FE000] text-[#041E00]'
+                            : 'bg-[#041B47]/75 border-[#00A3FF]/30 text-blue-100 hover:text-white hover:border-[#00A3FF]'
+                        }`}
+                      >
+                        {grp} ({groupCounts[grp] ?? 0})
+                      </button>
+                    ))}
+                    {(groupCounts.__ungrouped__ ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setGroupFilter('__ungrouped__')}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer tabular-nums ${
+                          groupFilter === '__ungrouped__'
+                            ? 'bg-[#7FE000] border-[#7FE000] text-[#041E00]'
+                            : 'bg-[#041B47]/75 border-[#00A3FF]/30 text-blue-100 hover:text-white hover:border-[#00A3FF]'
+                        }`}
+                      >
+                        Otros ({groupCounts.__ungrouped__})
+                      </button>
+                    )}
+                  </div>
+
+                  {groupFilter === 'Todos' && (
+                    <div className="inline-flex p-0.5 bg-[#041B47]/80 border border-[#00A3FF]/30 rounded-lg shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setViewLayout('agrupado')}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                          viewLayout === 'agrupado'
+                            ? 'bg-[#0052CC] text-white'
+                            : 'text-blue-100/75 hover:text-white'
+                        }`}
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        Por programa
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewLayout('cuadricula')}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                          viewLayout === 'cuadricula'
+                            ? 'bg-[#0052CC] text-white'
+                            : 'text-blue-100/75 hover:text-white'
+                        }`}
+                      >
+                        <LayoutGrid className="w-3.5 h-3.5" />
+                        Todo junto
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <InlinePromotionSlot
                 promotions={activePromotions}
                 position="sobre_programas"
@@ -831,12 +1163,13 @@ export default function App() {
                       Mostrar Ejemplos Base
                     </button>
                   )}
-                  {(searchQuery || platformFilter !== 'Todas') && (
+                  {(searchQuery || platformFilter !== 'Todas' || groupFilter !== 'Todos') && (
                     <button
                       type="button"
                       onClick={() => {
                         setSearchQuery('');
                         setPlatformFilter('Todas');
+                        setGroupFilter('Todos');
                       }}
                       className="px-4 py-2 text-xs font-medium text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg cursor-pointer"
                     >
@@ -846,16 +1179,19 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <section
-                aria-label="Catálogo de programas"
-                className={catalogGridClass}
-              >
-                {filteredPrograms.map((prog) => {
+              (() => {
+                const renderProgramCard = (
+                  prog: ProgramRecord,
+                  siblings: ProgramRecord[],
+                  indexInSiblings: number
+                ) => {
                   const defaults = getDefaultMediaForProgram(prog.slug || prog.category);
                   const isBroken = Boolean(brokenImageIds[prog.id]);
                   const tileSrc = isBroken
                     ? defaults.imageUrl
                     : prog.imageUrl || prog.iconUrl || defaults.imageUrl;
+                  const currentGroup = (prog.programGroup ?? '').trim();
+                  const isEditingCustomGroup = customGroupTargetId === prog.id;
 
                   return (
                     <article key={prog.id} className="flex flex-col">
@@ -900,7 +1236,7 @@ export default function App() {
                             <select
                               aria-label={`Ubicación individual de ${prog.name}`}
                               title={`Ubicación individual de ${prog.name}`}
-                              value={optimisticPlatforms[prog.id] ?? prog.platform}
+                              value={prog.platform}
                               disabled={updatingPlatformId === prog.id}
                               onChange={(e) =>
                                 handleCardPlatformChange(prog, e.target.value as ProgramPlatform)
@@ -916,7 +1252,7 @@ export default function App() {
                           </div>
                         ) : (
                           <span className="font-mono text-[#7AD7FF] font-semibold tabular-nums truncate">
-                            {prog.platform}
+                            {currentGroup ? `${currentGroup} · ${prog.platform}` : prog.platform}
                           </span>
                         )}
                         <button
@@ -938,55 +1274,189 @@ export default function App() {
 
                       {/* Owner Quick Inline Controls (only on Firestore programs when signed in as owner) */}
                       {isAdmin && !showingStarterFallback && (
-                        <div className="mt-2 pt-2 border-t border-white/15 flex items-center justify-between gap-2 text-[11px]">
-                          <label className="inline-flex items-center gap-1 font-medium text-[#7AD7FF] hover:text-white cursor-pointer">
-                            <ImageIcon className="w-3 h-3" />
-                            <span>{updatingImageId === prog.id ? '...' : 'Imagen'}</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              disabled={updatingImageId === prog.id}
-                              onChange={(e) =>
-                                handleCardImageReplace(prog, e.target.files?.[0] ?? null)
-                              }
-                              className="sr-only"
-                            />
-                          </label>
-
-                          {confirmDeleteId === prog.id ? (
-                            <span className="inline-flex items-center gap-1">
-                              <button
-                                type="button"
-                                disabled={deletingId === prog.id}
-                                onClick={() => handleCardDelete(prog)}
-                                className="px-1.5 py-0.5 text-[11px] font-semibold text-white bg-red-600 hover:bg-red-700 rounded cursor-pointer"
-                              >
-                                {deletingId === prog.id ? '...' : 'Sí'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteId(null)}
-                                className="px-1.5 py-0.5 text-[11px] text-white bg-white/15 rounded cursor-pointer"
-                              >
-                                No
-                              </button>
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteId(prog.id)}
-                              className="inline-flex items-center gap-1 font-medium text-rose-300 hover:text-rose-200 cursor-pointer"
+                        <div className="mt-2 pt-2 border-t border-white/15 space-y-2 text-[11px]">
+                          {/* Group assignment selector / inline custom group input */}
+                          {isEditingCustomGroup ? (
+                            <form
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                void handleCardGroupChange(prog, customGroupDraft);
+                              }}
+                              className="flex items-center gap-1"
                             >
-                              <Trash2 className="w-3 h-3" />
-                              Eliminar
-                            </button>
+                              <input
+                                type="text"
+                                autoFocus
+                                maxLength={SCHEMA_LIMITS.PROGRAM_GROUP_MAX}
+                                value={customGroupDraft}
+                                onChange={(e) => setCustomGroupDraft(e.target.value)}
+                                placeholder="Nombre del grupo..."
+                                className="min-w-0 flex-1 px-2 py-1 text-[11px] bg-[#031B49] text-white placeholder:text-blue-200/50 border border-[#00A3FF] rounded focus:outline-none"
+                              />
+                              <button
+                                type="submit"
+                                disabled={updatingGroupId === prog.id}
+                                className="px-2 py-1 text-[11px] font-bold text-[#041E00] bg-[#7FE000] hover:bg-[#91F20F] rounded cursor-pointer shrink-0"
+                              >
+                                OK
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCustomGroupTargetId(null);
+                                  setCustomGroupDraft('');
+                                }}
+                                className="px-1.5 py-1 text-[11px] text-white bg-white/15 hover:bg-white/25 rounded cursor-pointer shrink-0"
+                              >
+                                ×
+                              </button>
+                            </form>
+                          ) : (
+                            <div
+                              className="flex items-center gap-1.5"
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                            >
+                              <select
+                                aria-label={`Grupo de programa de ${prog.name}`}
+                                title={`Agrupar ${prog.name} por programa`}
+                                value={currentGroup}
+                                disabled={updatingGroupId === prog.id}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === '__custom__') {
+                                    setCustomGroupTargetId(prog.id);
+                                    setCustomGroupDraft(currentGroup);
+                                  } else {
+                                    void handleCardGroupChange(prog, val);
+                                  }
+                                }}
+                                className="w-full text-[11px] font-medium text-blue-50 bg-[#031B49]/90 border border-[#00A3FF]/35 rounded-md px-2 py-1 cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#7FE000] hover:border-[#7FE000]"
+                              >
+                                <option value="" className="bg-[#031B49] text-blue-200">
+                                  Grupo: Sin agrupar
+                                </option>
+                                {allAssignableGroups.map((grp) => (
+                                  <option key={grp} value={grp} className="bg-[#031B49] text-white">
+                                    Grupo: {grp}
+                                  </option>
+                                ))}
+                                <option value="__custom__" className="bg-[#031B49] text-[#7FE000]">
+                                  + Nuevo grupo...
+                                </option>
+                              </select>
+                            </div>
                           )}
+
+                          <div className="flex items-center justify-between gap-1.5">
+                            <label className="inline-flex items-center gap-1 font-medium text-[#7AD7FF] hover:text-white cursor-pointer shrink-0">
+                              <ImageIcon className="w-3 h-3" />
+                              <span>{updatingImageId === prog.id ? '...' : 'Imagen'}</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                disabled={updatingImageId === prog.id}
+                                onChange={(e) =>
+                                  handleCardImageReplace(prog, e.target.files?.[0] ?? null)
+                                }
+                                className="sr-only"
+                              />
+                            </label>
+
+                            {/* Quick left/right position controls within the current list */}
+                            <div className="inline-flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                aria-label={`Mover ${prog.name} antes`}
+                                title="Mover antes"
+                                disabled={indexInSiblings <= 0 || Boolean(reorderingId)}
+                                onClick={() => handleCardMoveInGroup(prog, -1, siblings)}
+                                className="p-1 rounded bg-[#031B49]/80 border border-[#00A3FF]/30 text-blue-100 hover:text-white hover:border-[#7FE000] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+                              >
+                                <ChevronLeft className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Mover ${prog.name} después`}
+                                title="Mover después"
+                                disabled={
+                                  indexInSiblings >= siblings.length - 1 || Boolean(reorderingId)
+                                }
+                                onClick={() => handleCardMoveInGroup(prog, 1, siblings)}
+                                className="p-1 rounded bg-[#031B49]/80 border border-[#00A3FF]/30 text-blue-100 hover:text-white hover:border-[#7FE000] disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+                              >
+                                <ChevronRight className="w-3 h-3" />
+                              </button>
+                            </div>
+
+                            {confirmDeleteId === prog.id ? (
+                              <span className="inline-flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={deletingId === prog.id}
+                                  onClick={() => handleCardDelete(prog)}
+                                  className="px-1.5 py-0.5 text-[11px] font-semibold text-white bg-red-600 hover:bg-red-700 rounded cursor-pointer"
+                                >
+                                  {deletingId === prog.id ? '...' : 'Sí'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteId(null)}
+                                  className="px-1.5 py-0.5 text-[11px] text-white bg-white/15 rounded cursor-pointer"
+                                >
+                                  No
+                                </button>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(prog.id)}
+                                className="inline-flex items-center gap-1 font-medium text-rose-300 hover:text-rose-200 cursor-pointer shrink-0"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                Eliminar
+                              </button>
+                            )}
+                          </div>
                         </div>
                       )}
                     </article>
                   );
-                })}
-              </section>
+                };
+
+                if (shouldRenderGrouped) {
+                  return (
+                    <div className="space-y-10" aria-label="Catálogo agrupado por programa">
+                      {groupedSections.map((section) => (
+                        <section key={section.key || '__ungrouped__'} className="space-y-4">
+                          <div className="pb-2.5 border-b border-white/15 flex items-baseline justify-between gap-4">
+                            <h2 className="font-display text-lg sm:text-xl font-bold text-white tracking-tight">
+                              {section.label}
+                            </h2>
+                            <span className="text-xs font-mono text-[#7AD7FF] tabular-nums whitespace-nowrap shrink-0">
+                              {section.items.length}{' '}
+                              {section.items.length === 1 ? 'programa' : 'programas'}
+                            </span>
+                          </div>
+                          <div className={catalogGridClass}>
+                            {section.items.map((prog, idx) =>
+                              renderProgramCard(prog, section.items, idx)
+                            )}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  );
+                }
+
+                return (
+                  <section aria-label="Catálogo de programas" className={catalogGridClass}>
+                    {filteredPrograms.map((prog, idx) =>
+                      renderProgramCard(prog, filteredPrograms, idx)
+                    )}
+                  </section>
+                );
+              })()
             )}
 
             <InlinePromotionSlot
@@ -1048,6 +1518,7 @@ export default function App() {
               </div>
             ) : (
               <ProgramUploadForm
+                availableGroups={allAssignableGroups}
                 onSuccess={() => {
                   setActiveSection('catalogo');
                   setSelectedProgramId(null);

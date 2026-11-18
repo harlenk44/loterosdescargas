@@ -9,6 +9,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import {
+  DEFAULT_PROGRAM_GROUPS,
   PROGRAM_CATEGORIES,
   PROGRAM_PLATFORMS,
   RELEASE_CHANNELS,
@@ -21,6 +22,8 @@ import {
 } from '../types/repository';
 import {
   createProgramWithInitialVersion,
+  normalizeProgramGroup,
+  normalizeSortOrder,
   publishNewVersion,
   signExternalRelease,
   uploadBinaryPackage,
@@ -31,16 +34,22 @@ import { PRESET_COVERS, PRESET_ICONS } from '../lib/programMedia';
 
 interface ProgramUploadFormProps {
   existingProgram?: ProgramRecord | null;
+  availableGroups?: string[];
   onSuccess: (programId: string) => void;
   onCancel?: () => void;
 }
 
 export const ProgramUploadForm: React.FC<ProgramUploadFormProps> = ({
   existingProgram,
+  availableGroups = [],
   onSuccess,
   onCancel,
 }) => {
   const isNewProgram = !existingProgram;
+
+  const suggestedGroups = Array.from(
+    new Set([...DEFAULT_PROGRAM_GROUPS, ...availableGroups].filter(Boolean))
+  );
 
   const [name, setName] = useState(existingProgram?.name ?? '');
   const [slug, setSlug] = useState(existingProgram?.slug ?? '');
@@ -49,6 +58,10 @@ export const ProgramUploadForm: React.FC<ProgramUploadFormProps> = ({
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<ProgramCategory>('Programas de Venta');
   const [platform, setPlatform] = useState<ProgramPlatform>('Windows');
+  const [programGroup, setProgramGroup] = useState(existingProgram?.programGroup ?? '');
+  const [sortOrderInput, setSortOrderInput] = useState(
+    existingProgram?.sortOrder !== undefined ? String(existingProgram.sortOrder) : ''
+  );
 
   const [iconUrl, setIconUrl] = useState<string>(PRESET_ICONS[0].url);
   const [imageUrl, setImageUrl] = useState<string>(PRESET_COVERS[0].url);
@@ -280,6 +293,8 @@ export const ProgramUploadForm: React.FC<ProgramUploadFormProps> = ({
       setStatusMessage('Guardando programa en tu repositorio...');
 
       if (isNewProgram) {
+        const cleanGroup = normalizeProgramGroup(programGroup, suggestedGroups);
+        const cleanSortOrder = normalizeSortOrder(sortOrderInput);
         const newProgramId = await createProgramWithInitialVersion({
           name: trimmedName,
           slug: effectiveSlug,
@@ -287,6 +302,8 @@ export const ProgramUploadForm: React.FC<ProgramUploadFormProps> = ({
           description: finalDescription,
           category,
           platform,
+          ...(cleanGroup ? { programGroup: cleanGroup } : {}),
+          ...(cleanSortOrder !== undefined ? { sortOrder: cleanSortOrder } : {}),
           iconUrl: finalIconUrl,
           imageUrl: finalImageUrl,
           autoUpdateEnabled: true,
@@ -391,6 +408,77 @@ export const ProgramUploadForm: React.FC<ProgramUploadFormProps> = ({
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          {/* Row 1.5: Program Group / Suite + Optional Sort Order */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-start">
+            <div className="md:col-span-3 space-y-2">
+              <label className="block text-sm font-medium text-[#0B1E3D]">
+                Programa / Familia (para agrupar juntos)
+              </label>
+              <input
+                type="text"
+                list="upload-program-groups"
+                maxLength={SCHEMA_LIMITS.PROGRAM_GROUP_MAX}
+                value={programGroup}
+                onChange={(e) => setProgramGroup(e.target.value)}
+                placeholder="Ej. Maxplay, Premier, Patronus (o escribe uno nuevo)"
+                className={inputClass}
+              />
+              <datalist id="upload-program-groups">
+                {suggestedGroups.map((grp) => (
+                  <option key={grp} value={grp} />
+                ))}
+              </datalist>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setProgramGroup('')}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    !programGroup.trim()
+                      ? 'bg-[#0052CC] border-[#0052CC] text-white'
+                      : 'bg-slate-50 border-blue-200 text-slate-600 hover:text-[#0B1E3D] hover:border-[#00A3FF]'
+                  }`}
+                >
+                  Sin grupo
+                </button>
+                {suggestedGroups.map((grp) => {
+                  const selected = programGroup.trim().toLowerCase() === grp.toLowerCase();
+                  return (
+                    <button
+                      key={grp}
+                      type="button"
+                      onClick={() => setProgramGroup(grp)}
+                      className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                        selected
+                          ? 'bg-[#0052CC] border-[#0052CC] text-white'
+                          : 'bg-slate-50 border-blue-200 text-slate-700 hover:text-[#0B1E3D] hover:border-[#00A3FF]'
+                      }`}
+                    >
+                      {grp}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[#0B1E3D] mb-2">
+                Orden (opcional)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={SCHEMA_LIMITS.SORT_ORDER_MAX}
+                value={sortOrderInput}
+                onChange={(e) => setSortOrderInput(e.target.value)}
+                placeholder="Ej. 1"
+                className={`${inputClass} font-mono tabular-nums`}
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Menor número aparece primero dentro del grupo.
+              </p>
             </div>
           </div>
 

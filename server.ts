@@ -1069,18 +1069,25 @@ async function startServer() {
     res.status(status).json({ error: message });
   });
 
-  if (process.env.NODE_ENV !== 'production') {
+  const distDir = path.join(__dirname, 'dist');
+  const distIndex = path.join(distDir, 'index.html');
+
+  if (process.env.NODE_ENV !== 'production' || !fs.existsSync(distIndex)) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+    void Promise.allSettled([
+      vite.warmupRequest('/src/main.tsx'),
+      vite.warmupRequest('/src/App.tsx'),
+      vite.warmupRequest('/src/index.css'),
+    ]);
   } else {
-    const distDir = path.join(__dirname, 'dist');
     app.use(express.static(distDir));
     app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.join(distDir, 'index.html'));
+      res.sendFile(distIndex);
     });
   }
 

@@ -57,8 +57,62 @@
       rel="stylesheet"
     />
   </head>
-  <body class="bg-[#02153A] text-white antialiased selection:bg-[#00A3FF]/30 selection:text-white">
-    <div id="root"></div>
+  <body
+    style="background-color: #02153a; color: #ffffff; margin: 0"
+    class="bg-[#02153A] text-white antialiased selection:bg-[#00A3FF]/30 selection:text-white"
+  >
+    <div id="root">
+      <div
+        data-boot-shell="1"
+        style="
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          background: linear-gradient(180deg, #021233 0%, #031b4a 50%, #02102b 100%);
+          color: #ffffff;
+          font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+          padding: 24px;
+          text-align: center;
+        "
+      >
+        <img
+          src="/assets/aistudio/Loteros_Descargas__Logo_Tecnol_gico_06091cd3.png"
+          alt="LOTEROSDESCARGAS"
+          style="height: 64px; width: auto; object-fit: contain; margin-bottom: 16px"
+        />
+        <p style="font-size: 15px; font-weight: 600; margin: 0 0 6px 0; color: #ffffff">
+          Cargando catálogo de LOTEROSDESCARGAS...
+        </p>
+        <p style="font-size: 12px; margin: 0; color: rgba(191, 219, 254, 0.8)">
+          Conectando con el repositorio de programas
+        </p>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      (function () {
+        var timer = setTimeout(function () {
+          var root = document.getElementById('root');
+          var stillBooting = root && root.querySelector('[data-boot-shell="1"]');
+          if (stillBooting) {
+            try {
+              var retried = sessionStorage.getItem('loteros_boot_retry');
+              if (!retried) {
+                sessionStorage.setItem('loteros_boot_retry', '1');
+                window.location.reload();
+              }
+            } catch (e) {}
+          }
+        }, 6000);
+        window.__clearLoterosBootTimer = function () {
+          clearTimeout(timer);
+          try {
+            sessionStorage.removeItem('loteros_boot_retry');
+          } catch (e) {}
+        };
+      })();
+    </script>
   </body>
 </html>

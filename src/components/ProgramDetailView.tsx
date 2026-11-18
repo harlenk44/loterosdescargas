@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import {
   COMMENT_CATEGORIES,
+  DEFAULT_PROGRAM_GROUPS,
   PROGRAM_CATEGORIES,
   PROGRAM_PLATFORMS,
   SCHEMA_LIMITS,
@@ -29,6 +30,8 @@ import {
   deleteComment,
   deleteProgramAndSubcollections,
   moderateComment,
+  normalizeProgramGroup,
+  normalizeSortOrder,
   recordProgramDownload,
   subscribeProgramComments,
   subscribeProgramVersions,
@@ -42,6 +45,7 @@ import { ProgramUploadForm } from './ProgramUploadForm';
 
 interface ProgramDetailViewProps {
   program: ProgramRecord;
+  availableGroups?: string[];
   isStarterOnly?: boolean;
   starterVersion?: ProgramVersionRecord | null;
   onImportStarter?: () => Promise<void>;
@@ -64,6 +68,7 @@ function normalizePlatform(raw: string): ProgramPlatform {
 
 export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
   program,
+  availableGroups = [],
   isStarterOnly = false,
   starterVersion = null,
   onImportStarter,
@@ -72,6 +77,10 @@ export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
   onBack,
   onSignIn,
 }) => {
+  const suggestedGroups = Array.from(
+    new Set([...DEFAULT_PROGRAM_GROUPS, ...availableGroups].filter(Boolean))
+  );
+
   const [activeTab, setActiveTab] = useState<DetailTab>('resumen');
   const [versions, setVersions] = useState<ProgramVersionRecord[]>(
     starterVersion ? [starterVersion] : []
@@ -110,6 +119,10 @@ export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
   const [editPlatform, setEditPlatform] = useState<ProgramPlatform>(
     normalizePlatform(program.platform)
   );
+  const [editProgramGroup, setEditProgramGroup] = useState(program.programGroup ?? '');
+  const [editSortOrder, setEditSortOrder] = useState(
+    program.sortOrder !== undefined ? String(program.sortOrder) : ''
+  );
   const [savingInfo, setSavingInfo] = useState(false);
 
   const defaults = getDefaultMediaForProgram(program.slug || program.category);
@@ -147,6 +160,8 @@ export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
     setEditDescription(program.description);
     setEditCategory(normalizeCategory(program.category));
     setEditPlatform(normalizePlatform(program.platform));
+    setEditProgramGroup(program.programGroup ?? '');
+    setEditSortOrder(program.sortOrder !== undefined ? String(program.sortOrder) : '');
   }, [program]);
 
   const latestVersionObj =
@@ -258,6 +273,8 @@ export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
     }
     setSavingInfo(true);
     setActionError(null);
+    const cleanGroup = normalizeProgramGroup(editProgramGroup, suggestedGroups);
+    const cleanOrder = normalizeSortOrder(editSortOrder);
     try {
       await updateProgramSettings(program.id, {
         name: editName.trim().slice(0, SCHEMA_LIMITS.NAME_MAX),
@@ -271,6 +288,8 @@ export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
         ).slice(0, SCHEMA_LIMITS.DESCRIPTION_MAX),
         category: editCategory,
         platform: editPlatform,
+        programGroup: cleanGroup,
+        ...(cleanOrder !== undefined ? { sortOrder: cleanOrder } : {}),
       });
       setEditingInfo(false);
     } catch (err) {
@@ -432,6 +451,68 @@ export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
               </select>
             </div>
           </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-start">
+            <div className="md:col-span-3 space-y-2">
+              <label className="block text-xs font-medium text-slate-700">
+                Programa / Familia (Grupo)
+              </label>
+              <input
+                type="text"
+                list="detail-program-groups"
+                maxLength={SCHEMA_LIMITS.PROGRAM_GROUP_MAX}
+                value={editProgramGroup}
+                onChange={(e) => setEditProgramGroup(e.target.value)}
+                placeholder="Ej. Maxplay, Premier, Patronus"
+                className="w-full px-3 py-2 text-sm bg-slate-50 text-[#0B1E3D] border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00A3FF]"
+              />
+              <datalist id="detail-program-groups">
+                {suggestedGroups.map((grp) => (
+                  <option key={grp} value={grp} />
+                ))}
+              </datalist>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setEditProgramGroup('')}
+                  className={`px-2 py-1 text-xs font-medium rounded-md border whitespace-nowrap shrink-0 cursor-pointer ${
+                    !editProgramGroup.trim()
+                      ? 'bg-[#0052CC] border-[#0052CC] text-white'
+                      : 'bg-slate-50 border-blue-200 text-slate-600 hover:border-[#00A3FF]'
+                  }`}
+                >
+                  Sin grupo
+                </button>
+                {suggestedGroups.map((grp) => (
+                  <button
+                    key={grp}
+                    type="button"
+                    onClick={() => setEditProgramGroup(grp)}
+                    className={`px-2 py-1 text-xs font-medium rounded-md border whitespace-nowrap shrink-0 cursor-pointer ${
+                      editProgramGroup.trim().toLowerCase() === grp.toLowerCase()
+                        ? 'bg-[#0052CC] border-[#0052CC] text-white'
+                        : 'bg-slate-50 border-blue-200 text-slate-700 hover:border-[#00A3FF]'
+                    }`}
+                  >
+                    {grp}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Orden (opcional)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={SCHEMA_LIMITS.SORT_ORDER_MAX}
+                value={editSortOrder}
+                onChange={(e) => setEditSortOrder(e.target.value)}
+                placeholder="Ej. 1"
+                className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-slate-50 text-[#0B1E3D] border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#00A3FF]"
+              />
+            </div>
+          </div>
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">Resumen corto</label>
             <input
@@ -541,6 +622,12 @@ export const ProgramDetailView: React.FC<ProgramDetailViewProps> = ({
 
             <div className="space-y-2 min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                {program.programGroup && (
+                  <>
+                    <span className="font-semibold text-[#0B1E3D]">{program.programGroup}</span>
+                    <span aria-hidden="true">·</span>
+                  </>
+                )}
                 <span className="font-medium text-[#0052CC]">{displayCategory}</span>
                 <span aria-hidden="true">·</span>
                 <span>{normalizePlatform(program.platform)}</span>
