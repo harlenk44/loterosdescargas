@@ -23,7 +23,7 @@ function AdCardContent({
     ad.placement === 'vertical' ||
     ad.placement === 'rectangulo'
   ) {
-    const showTextBlock = hasBannerText || showCustomBadge || Boolean(ad.linkUrl) || !showImage;
+    const showTextBlock = hasBannerText || showCustomBadge || !showImage;
     return (
       <div className="w-[160px] rounded-2xl overflow-hidden bg-[#041B47]/92 backdrop-blur-md border border-[#00A3FF]/45 hover:border-[#7FE000] transition-all shadow-[0_14px_34px_rgba(0,10,36,0.58)] flex flex-col">
         {showImage ? (
@@ -88,10 +88,10 @@ function AdCardContent({
             />
           </div>
         )}
-        {(hasBannerText || !showImage || ad.linkUrl) && (
+        {(hasBannerText || showCustomBadge || !showImage) && (
           <div className="px-4 py-3 sm:px-5 sm:py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-t border-white/10">
             <div className="space-y-0.5 min-w-0">
-              {ad.badgeText && (
+              {showCustomBadge && (
                 <span className="inline-block text-[10px] font-bold uppercase tracking-wider text-[#7FE000]">
                   {ad.badgeText}
                 </span>
@@ -134,10 +134,10 @@ function AdCardContent({
           />
         </div>
       )}
-      {(hasBannerText || !showImage || ad.linkUrl || ad.badgeText) && (
+      {(hasBannerText || showCustomBadge || !showImage) && (
         <div className="p-3.5 flex-1 flex flex-col justify-between gap-2">
           <div className="space-y-1">
-            {ad.badgeText && (
+            {showCustomBadge && (
               <span className="inline-block text-[10px] font-bold uppercase tracking-wider text-[#7FE000]">
                 {ad.badgeText}
               </span>
